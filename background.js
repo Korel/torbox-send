@@ -1,11 +1,48 @@
 const API = "https://api.torbox.app/v1/api";
 const MENU_ID = "send-to-torbox";
 const MARK_MENU_ID = "mark-sendable-links";
+const SEND_PAGE_MENU_ID = "send-page-to-torbox";
 
 const TORRENT_TYPE = /application\/(x-)?bittorrent/i;
 const NZB_TYPE = /application\/(x-)?nzb/i;
 const TORRENT_NAME = /\.torrent$/i;
 const NZB_NAME = /\.nzb(\.gz)?$/i;
+
+const HOSTERS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+let hosterRules = null; // [{ regex, stream }]; null until a list was ever fetched
+
+function compileRules(entries) {
+  return entries.flatMap(({ pattern, stream }) => {
+    try {
+      return [{ regex: new RegExp(pattern, "i"), stream }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+// TorBox's public list of supported hosters; fetched without credentials and matched locally.
+// "stream" entries are video/social sites (YouTube, Twitter, …), skipped unless the user opts in.
+async function refreshHosters() {
+  try {
+    const res = await fetch(`${API}/webdl/hosters`);
+    const body = await res.json();
+    const entries = (body.data || [])
+      .filter((hoster) => typeof hoster.regex === "string")
+      .map((hoster) => ({ pattern: hoster.regex, stream: hoster.type === "stream" }));
+    if (!res.ok || entries.length === 0) return;
+    await browser.storage.local.set({ hosters: { fetchedAt: Date.now(), entries } });
+    hosterRules = compileRules(entries);
+  } catch {}
+}
+
+async function loadHosters() {
+  const { hosters } = await browser.storage.local.get("hosters");
+  if (hosters?.entries) hosterRules = compileRules(hosters.entries);
+  if (!hosters?.entries || Date.now() - hosters.fetchedAt > HOSTERS_MAX_AGE_MS) await refreshHosters();
+}
+
+const hostersReady = loadHosters();
 
 function safeDecode(text) {
   try {
@@ -85,6 +122,16 @@ async function send(url) {
   return post("/webdl/createwebdownload", { link: url });
 }
 
+// failOpen: with no hoster list yet, say yes rather than hide a link TorBox could take.
+async function isSendable(url, { failOpen = true } = {}) {
+  const name = urlFileName(url);
+  if (url.startsWith("magnet:") || TORRENT_NAME.test(name) || NZB_NAME.test(name)) return true;
+  await hostersReady;
+  if (hosterRules === null) return failOpen;
+  const { includeStreamSites } = await browser.storage.local.get({ includeStreamSites: false });
+  return hosterRules.some((rule) => (includeStreamSites || !rule.stream) && rule.regex.test(url));
+}
+
 function displayName(url) {
   if (url.startsWith("magnet:")) {
     try {
@@ -114,41 +161,61 @@ async function sendAndReport(url, tabId) {
   await report(tabId, "pending", "Sending to TorBox…", name);
   try {
     const body = await send(url);
-    await report(tabId, "ok", "Added to TorBox", body.data?.name || name);
+    const addedName = body.data?.name || name;
+    await report(tabId, "ok", "Added to TorBox", addedName);
+    return { ok: true, name: addedName };
   } catch (error) {
     await report(tabId, "error", "Not added to TorBox", error.message);
+    return { ok: false, error: error.message };
   }
 }
 
 async function markAndReport(tabId) {
-  let count;
+  let counts;
   try {
-    count = await browser.tabs.sendMessage(tabId, { type: "mark" });
+    counts = await browser.tabs.sendMessage(tabId, { type: "mark" });
   } catch {
     return report(tabId, "error", "Can't scan this page", "Reload it and try again.");
   }
-  if (count) await report(tabId, "ok", `Marked ${count} sendable link${count === 1 ? "" : "s"}`, "Look for the cube next to each link.");
-  else await report(tabId, "ok", "Nothing to mark", "No magnet, .torrent or .nzb links on this page.");
+  if (!counts?.total) return report(tabId, "ok", "Nothing to mark", "No magnet, .torrent, .nzb or hoster links on this page.");
+  const title = `Marked ${counts.total} sendable link${counts.total === 1 ? "" : "s"}`;
+  const detail = counts.hosters ? "Green: click to send. Blue: right-click → Send to TorBox." : "Click a marked link to send it.";
+  await report(tabId, "ok", title, detail);
 }
 
 function createMenu() {
-  browser.contextMenus.removeAll().then(() => {
-    browser.contextMenus.create({ id: MENU_ID, title: "Send to TorBox", contexts: ["link"] });
+  browser.menus.removeAll().then(() => {
+    browser.menus.create({ id: MENU_ID, title: "Send to TorBox", contexts: ["link"] });
     // Not on links, so a link's menu keeps a single "Send to TorBox" entry instead of a submenu.
-    browser.contextMenus.create({ id: MARK_MENU_ID, title: "Mark sendable links on this page", contexts: ["page", "frame", "selection"] });
+    browser.menus.create({ id: MARK_MENU_ID, title: "Mark sendable links on this page", contexts: ["page", "frame", "selection"] });
+    browser.menus.create({ id: SEND_PAGE_MENU_ID, title: "Send this page to TorBox", contexts: ["page", "frame", "selection"], visible: false });
   });
 }
 
 browser.runtime.onInstalled.addListener(createMenu);
 browser.runtime.onStartup.addListener(createMenu);
 
-browser.contextMenus.onClicked.addListener((info, tab) => {
+browser.menus.onShown.addListener(async (info) => {
+  const updates = [];
+  if (info.contexts.includes("link") && info.linkUrl) {
+    updates.push(browser.menus.update(MENU_ID, { visible: await isSendable(info.linkUrl) }));
+  }
+  if (info.pageUrl) {
+    updates.push(browser.menus.update(SEND_PAGE_MENU_ID, { visible: await isSendable(info.pageUrl, { failOpen: false }) }));
+  }
+  await Promise.all(updates);
+  browser.menus.refresh();
+});
+
+browser.menus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_ID && info.linkUrl) sendAndReport(info.linkUrl, tab?.id);
+  if (info.menuItemId === SEND_PAGE_MENU_ID && info.pageUrl) sendAndReport(info.pageUrl, tab?.id);
   if (info.menuItemId === MARK_MENU_ID && tab?.id >= 0) markAndReport(tab.id);
 });
 
+// Content scripts send from their own tab; the popup has no tab and passes the page's tab along.
 browser.runtime.onMessage.addListener((message, sender) => {
-  if (sender.id === browser.runtime.id && message?.type === "send" && typeof message.url === "string") {
-    sendAndReport(message.url, sender.tab?.id);
-  }
+  if (sender.id !== browser.runtime.id || typeof message?.url !== "string") return;
+  if (message.type === "send") return sendAndReport(message.url, sender.tab?.id ?? message.tabId);
+  if (message.type === "is-sendable-page") return isSendable(message.url, { failOpen: false });
 });

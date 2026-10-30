@@ -1,10 +1,31 @@
-const settings = { autoCapture: true, hoverHint: true };
+const settings = { autoCapture: true, hoverHint: true, includeStreamSites: false };
+let hosterEntries = [];
+let hosterRules = null; // compiled on first use
+
+function setHosters(hosters) {
+  hosterEntries = hosters?.entries || [];
+  hosterRules = null;
+}
+
 browser.storage.local.get(settings).then((stored) => Object.assign(settings, stored));
+browser.storage.local.get("hosters").then(({ hosters }) => setHosters(hosters));
 browser.storage.onChanged.addListener((changes) => {
   for (const [key, { newValue }] of Object.entries(changes)) {
     if (key in settings) settings[key] = newValue;
   }
+  if (changes.hosters) setHosters(changes.hosters.newValue);
 });
+
+function isHosterLink(href) {
+  hosterRules ??= hosterEntries.flatMap(({ pattern, stream }) => {
+    try {
+      return [{ regex: new RegExp(pattern, "i"), stream }];
+    } catch {
+      return [];
+    }
+  });
+  return hosterRules.some((rule) => (settings.includeStreamSites || !rule.stream) && rule.regex.test(href));
+}
 
 function isCapturable(href) {
   if (href.startsWith("magnet:")) return true;
@@ -22,15 +43,18 @@ function capturableLink(event) {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-function cubeIcon(size) {
+const GREEN_CUBE = ["#8cdc78", "#3cac6c", "#1c8062"];
+const BLUE_CUBE = ["#8cc8f0", "#3c8cd0", "#1c5c9c"];
+
+function cubeIcon(size, colors = GREEN_CUBE) {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 32 32");
   svg.setAttribute("width", size);
   svg.setAttribute("height", size);
   const faces = [
-    ["16,2 29,9.5 16,17 3,9.5", "#8cdc78"],
-    ["3,9.5 16,17 16,30 3,22.5", "#3cac6c"],
-    ["16,17 29,9.5 29,22.5 16,30", "#1c8062"],
+    ["16,2 29,9.5 16,17 3,9.5", colors[0]],
+    ["3,9.5 16,17 16,30 3,22.5", colors[1]],
+    ["16,17 29,9.5 29,22.5 16,30", colors[2]],
   ];
   for (const [points, fill] of faces) {
     const face = document.createElementNS(SVG_NS, "polygon");
@@ -109,26 +133,68 @@ document.documentElement.addEventListener("mouseleave", hideHint);
 
 const markedLinks = new WeakSet();
 
+// TorBox's hoster patterns cover whole domains (github.com, youtube.com), so on those sites
+// every internal link would match; only links leaving the current site get a hoster mark.
+function isOtherSiteHosterLink(link) {
+  return link.hostname.replace(/^www\./, "") !== location.hostname.replace(/^www\./, "") && isHosterLink(link.href);
+}
+
+function sendableLinks() {
+  return [...document.querySelectorAll("a[href]")].flatMap((link) => {
+    if (isCapturable(link.href)) return [{ link, clickable: true }];
+    if (isOtherSiteHosterLink(link)) return [{ link, clickable: false }];
+    return [];
+  });
+}
+
 function markLinks() {
-  let count = 0;
-  for (const link of document.querySelectorAll("a[href]")) {
-    if (!isCapturable(link.href)) continue;
-    count++;
+  const counts = { total: 0, hosters: 0 };
+  for (const { link, clickable } of sendableLinks()) {
+    counts.total++;
+    if (!clickable) counts.hosters++;
     if (markedLinks.has(link)) continue;
     markedLinks.add(link);
-    const marker = shadowHost("span", { display: "inline-block", verticalAlign: "middle", marginLeft: "4px" }, cubeIcon(14));
-    marker.title = "TorBox Send can send this link";
+    const icon = cubeIcon(14, clickable ? GREEN_CUBE : BLUE_CUBE);
+    const marker = shadowHost("span", { display: "inline-block", verticalAlign: "middle", marginLeft: "4px" }, icon);
+    marker.title = clickable ? "Click to send to TorBox" : "Hoster link: right-click → Send to TorBox";
     link.after(marker);
   }
-  return count;
+  return counts;
+}
+
+let listedLinks = [];
+
+// Every frame reports its own links straight to the popup, since tabs.sendMessage returns only one frame's reply.
+function reportLinks(requestId) {
+  const found = sendableLinks();
+  listedLinks = found.map(({ link }) => link);
+  if (found.length === 0 && window !== window.top) return;
+  const links = found.map(({ link, clickable }, index) => ({
+    index,
+    clickable,
+    href: link.href,
+    text: link.textContent.trim().replace(/\s+/g, " ").slice(0, 120),
+    hidden: link.getClientRects().length === 0,
+  }));
+  browser.runtime.sendMessage({ type: "links", requestId, links }).catch(() => {});
+}
+
+function revealLink(link) {
+  if (!link?.isConnected) return;
+  link.scrollIntoView({ behavior: "smooth", block: "center" });
+  const { outline, outlineOffset } = link.style;
+  Object.assign(link.style, { outline: "3px solid #f5a623", outlineOffset: "2px" });
+  setTimeout(() => Object.assign(link.style, { outline, outlineOffset }), 2500);
 }
 
 browser.runtime.onMessage.addListener((message) => {
   if (message?.type === "toast") showToast(message);
+  if (message?.type === "list") reportLinks(message.requestId);
+  if (message?.type === "reveal") revealLink(listedLinks[message.index]);
   if (message?.type === "mark") {
-    const count = markLinks();
+    const counts = markLinks();
     // Only the top frame always answers, so the popup gets a reply even when no frame has matches.
-    if (count || window === window.top) return Promise.resolve(count);
+    if (counts.total || window === window.top) return Promise.resolve(counts);
   }
 });
 

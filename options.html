@@ -4,34 +4,69 @@
   <meta charset="utf-8">
   <title>TorBox Send</title>
   <style>
-    :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
-    body { width: 22rem; margin: 1rem; }
+    :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; --line: color-mix(in srgb, currentColor 18%, transparent); }
+    body { width: 24rem; margin: 0; }
+    main { padding: 0.75rem 1rem 1rem; }
     label { display: block; margin-top: 1rem; }
     input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
-    button { margin-top: 1rem; padding: 0.4rem 1rem; font: inherit; }
+    button { padding: 0.35rem 0.9rem; font: inherit; }
     #get-key { margin: 0.5rem 0 0.25rem; }
+    #save { margin-top: 0.75rem; }
     .hint { opacity: 0.7; font-size: 0.9em; }
-    #status { margin-top: 0.75rem; min-height: 1.5em; }
-    #status.error { color: #d33; }
+    #status, #links-status { margin-top: 0.75rem; min-height: 1.5em; }
+    .error { color: #d33; }
+
+    nav { display: flex; border-bottom: 1px solid var(--line); }
+    nav button { flex: 1; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 0.6rem; cursor: pointer; }
+    nav button[aria-selected="true"] { border-bottom-color: #3cac6c; font-weight: 600; }
+
+    #links { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; }
+    #links li { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
+    .cube { flex: none; width: 12px; height: 12px; border-radius: 3px; background: #3cac6c; }
+    .cube.hoster { background: #3c8cd0; }
+    .link-text { flex: 1; min-width: 0; }
+    .link-title, .link-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .link-sub { opacity: 0.65; font-size: 0.85em; }
+    .tag { font-size: 0.75em; padding: 0 0.3rem; border-radius: 3px; background: var(--line); }
+    #links button { flex: none; padding: 0.2rem 0.6rem; font-size: 0.9em; }
+    .links-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
+    .links-footer button { flex: none; white-space: nowrap; }
   </style>
 </head>
 <body>
-  <section id="page-tools" hidden>
-    <button id="mark-links" type="button">Mark sendable links on this page</button>
-  </section>
+  <nav id="tabs" hidden>
+    <button id="tab-links" type="button" aria-selected="true">Links on this page</button>
+    <button id="tab-settings" type="button" aria-selected="false">Settings</button>
+  </nav>
 
-  <label for="api-key">TorBox API key</label>
-  <input id="api-key" type="password" autocomplete="off" spellcheck="false">
-  <button id="get-key" type="button">Get API key on torbox.app</button>
-  <div class="hint">Stored only in this browser; sent only to api.torbox.app.</div>
-  <button id="save">Save key</button>
+  <main>
+    <section id="links-view" hidden>
+      <ul id="links"></ul>
+      <div id="links-status">Looking for links…</div>
+      <div class="links-footer">
+        <span class="hint">Green: click sends · Blue: hoster</span>
+        <button id="mark-links" type="button">Mark all on page</button>
+      </div>
+    </section>
 
-  <label><input id="auto-capture" type="checkbox"> Send magnet, .torrent and .nzb links to TorBox when clicked</label>
-  <div class="hint">Hold Ctrl/Cmd, Shift or Alt while clicking to open the link normally instead.</div>
+    <section id="settings-view">
+      <label for="api-key">TorBox API key</label>
+      <input id="api-key" type="password" autocomplete="off" spellcheck="false">
+      <button id="get-key" type="button">Get API key on torbox.app</button>
+      <div class="hint">Stored only in this browser; sent only to api.torbox.app.</div>
+      <button id="save">Save key</button>
 
-  <label><input id="hover-hint" type="checkbox"> Show a badge when hovering a link that a click will send</label>
+      <label><input id="auto-capture" type="checkbox"> Send magnet, .torrent and .nzb links to TorBox when clicked</label>
+      <div class="hint">Hold Ctrl/Cmd, Shift or Alt while clicking to open the link normally instead.</div>
 
-  <div id="status"></div>
+      <label><input id="hover-hint" type="checkbox"> Show a badge when hovering a link that a click will send</label>
+
+      <label><input id="include-stream-sites" type="checkbox"> Treat video &amp; social sites as hosters</label>
+      <div class="hint">YouTube, Twitter, Facebook, Instagram, TikTok… TorBox can download from them, but most such links aren't worth sending.</div>
+
+      <div id="status"></div>
+    </section>
+  </main>
 
   <script src="options.js"></script>
 </body>
