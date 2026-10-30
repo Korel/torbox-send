@@ -72,20 +72,43 @@ function magnetName(href) {
   }
 }
 
-function button(text, onClick) {
+function button(text, className, onClick) {
   const element = document.createElement("button");
   element.type = "button";
+  element.className = className;
   element.textContent = text;
   element.addEventListener("click", onClick);
   return element;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+const GREEN_CUBE = ["#8cdc78", "#3cac6c", "#1c8062"];
+const BLUE_CUBE = ["#8cc8f0", "#3c8cd0", "#1c5c9c"];
+
+function cubeIcon(size, colors) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 32 32");
+  svg.setAttribute("width", size);
+  svg.setAttribute("height", size);
+  const faces = ["16,2 29,9.5 16,17 3,9.5", "3,9.5 16,17 16,30 3,22.5", "16,17 29,9.5 29,22.5 16,30"];
+  faces.forEach((points, i) => {
+    const face = document.createElementNS(SVG_NS, "polygon");
+    face.setAttribute("points", points);
+    face.setAttribute("fill", colors[i]);
+    svg.append(face);
+  });
+  return svg;
+}
+
+document.getElementById("legend").replaceChildren(cubeIcon(12, GREEN_CUBE), "click sends", cubeIcon(12, BLUE_CUBE), "hoster");
+
 function addLinkRow(link, frameId) {
   const row = document.createElement("li");
 
-  const cube = document.createElement("span");
-  cube.className = link.clickable ? "cube" : "cube hoster";
-  cube.title = link.clickable ? "Click on the page sends it" : "Hoster link: right-click to send";
+  const cube = cubeIcon(18, link.clickable ? GREEN_CUBE : BLUE_CUBE);
+  cube.append(Object.assign(document.createElementNS(SVG_NS, "title"), {
+    textContent: link.clickable ? "Click on the page sends it" : "Hoster link: right-click to send",
+  }));
 
   const text = document.createElement("div");
   text.className = "link-text";
@@ -98,23 +121,24 @@ function addLinkRow(link, frameId) {
   subtitle.textContent = linkSubtitle(link.href);
   if (link.isPage || link.hidden) {
     const tag = document.createElement("span");
-    tag.className = "tag";
-    tag.textContent = link.isPage ? "this page" : "hidden on page";
-    subtitle.prepend(tag, " ");
+    tag.className = link.isPage ? "tag page" : "tag";
+    tag.textContent = link.isPage ? "this page" : "hidden";
+    subtitle.prepend(tag);
   }
   text.append(title, subtitle);
 
-  const send = button("Send", async () => {
+  const send = button("Send", "btn sm primary", async () => {
     send.disabled = true;
     send.textContent = "Sending…";
     const result = await browser.runtime.sendMessage({ type: "send", url: link.href, tabId: pageTabId });
-    send.textContent = result?.ok ? "Added" : "Failed";
+    send.textContent = result?.ok ? "Added ✓" : "Failed";
+    send.className = `btn sm ${result?.ok ? "done" : "failed"}`;
     send.title = result?.ok ? "" : result?.error || "";
     send.disabled = !!result?.ok;
   });
   row.append(cube, text, send);
   if (!link.isPage) {
-    const show = button("Show", () => browser.tabs.sendMessage(pageTabId, { type: "reveal", index: link.index }, { frameId }));
+    const show = button("Show", "btn sm", () => browser.tabs.sendMessage(pageTabId, { type: "reveal", index: link.index }, { frameId }));
     show.disabled = link.hidden;
     if (link.hidden) show.title = "Not visible on the page, e.g. inside a collapsed menu";
     row.append(show);

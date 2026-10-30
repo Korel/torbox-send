@@ -4,67 +4,159 @@
   <meta charset="utf-8">
   <title>TorBox Send</title>
   <style>
-    :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; --line: color-mix(in srgb, currentColor 18%, transparent); }
-    body { width: 24rem; margin: 0; }
-    main { padding: 0.75rem 1rem 1rem; }
-    label { display: block; margin-top: 1rem; }
-    input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
-    button { padding: 0.35rem 0.9rem; font: inherit; }
-    #get-key { margin: 0.5rem 0 0.25rem; }
-    #save { margin-top: 0.75rem; }
-    .hint { opacity: 0.7; font-size: 0.9em; }
-    #status, #links-status { margin-top: 0.75rem; min-height: 1.5em; }
-    .error { color: #d33; }
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f8f6;
+      --surface: #ffffff;
+      --hover: #edf3ef;
+      --border: #dce5df;
+      --text: #16201a;
+      --muted: #5f6d65;
+      --green: #2f9e62;
+      --green-hover: #27874f;
+      --green-soft: #e1f3e8;
+      --error: #c62828;
+      --error-soft: #fdecea;
+      --focus: rgba(60, 172, 108, 0.35);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1418;
+        --surface: #161d22;
+        --hover: #1e282e;
+        --border: #27323a;
+        --text: #e5ecef;
+        --muted: #8b9aa3;
+        --green: #3cac6c;
+        --green-hover: #4cc07e;
+        --green-soft: #17311f;
+        --error: #ff7a70;
+        --error-soft: #3a1c1b;
+      }
+    }
 
-    nav { display: flex; border-bottom: 1px solid var(--line); }
-    nav button { flex: 1; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 0.6rem; cursor: pointer; }
-    nav button[aria-selected="true"] { border-bottom-color: #3cac6c; font-weight: 600; }
+    * { box-sizing: border-box; }
+    body { width: 25rem; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, sans-serif; }
+    button { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-    #links { list-style: none; margin: 0; padding: 0; max-height: 22rem; overflow-y: auto; }
-    #links li { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0; border-bottom: 1px solid var(--line); }
-    .cube { flex: none; width: 12px; height: 12px; border-radius: 3px; background: #3cac6c; }
-    .cube.hoster { background: #3c8cd0; }
+    header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    header img { width: 22px; height: 22px; }
+    header .name { font-weight: 650; font-size: 14px; flex: 1; }
+
+    .tabs { display: flex; padding: 2px; border-radius: 8px; background: var(--hover); }
+    .tabs button { border: 0; border-radius: 6px; background: none; padding: 4px 12px; color: var(--muted); cursor: pointer; }
+    .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15); }
+
+    main { padding: 12px 14px 14px; }
+
+    .btn { border: 1px solid var(--border); border-radius: 7px; background: var(--surface); padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+    .btn:hover:not(:disabled) { background: var(--hover); }
+    .btn.primary { border-color: var(--green); background: var(--green); color: #fff; font-weight: 600; }
+    .btn.primary:hover:not(:disabled) { background: var(--green-hover); border-color: var(--green-hover); }
+    .btn.sm { padding: 3px 10px; font-size: 12px; }
+    .btn:disabled { cursor: default; opacity: 0.45; }
+    .btn.done { border-color: transparent; background: var(--green-soft); color: var(--green); opacity: 1; }
+    .btn.failed { border-color: transparent; background: var(--error-soft); color: var(--error); }
+
+    .links { list-style: none; margin: 0 -6px; padding: 0; max-height: 21rem; overflow-y: auto; }
+    .links li { display: flex; align-items: center; gap: 10px; padding: 7px 6px; border-radius: 8px; }
+    .links li:hover { background: var(--hover); }
+    .links svg { flex: none; }
     .link-text { flex: 1; min-width: 0; }
     .link-title, .link-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .link-sub { opacity: 0.65; font-size: 0.85em; }
-    .tag { font-size: 0.75em; padding: 0 0.3rem; border-radius: 3px; background: var(--line); }
-    #links button { flex: none; padding: 0.2rem 0.6rem; font-size: 0.9em; }
-    .links-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-top: 0.75rem; }
-    .links-footer button { flex: none; white-space: nowrap; }
+    .link-title { font-weight: 500; }
+    .link-sub { color: var(--muted); font-size: 11.5px; }
+    .tag { display: inline-block; margin-right: 4px; padding: 0 5px; border-radius: 4px; background: var(--hover); color: var(--muted); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.02em; }
+    .tag.page { background: var(--green-soft); color: var(--green); }
+
+    .status { margin: 10px 0 0; min-height: 1.4em; color: var(--muted); }
+    .status.error { color: var(--error); }
+    .status:empty { display: none; }
+
+    .links-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .legend { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; }
+    .legend svg { margin-left: 4px; }
+
+    .field label { display: block; margin-bottom: 6px; font-weight: 600; }
+    .key-row { display: flex; gap: 8px; }
+    .key-row input { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; }
+    .key-row input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--focus); }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 11.5px; }
+    .link-btn { border: 0; padding: 0; background: none; color: var(--green); cursor: pointer; font-size: inherit; }
+    .link-btn:hover { text-decoration: underline; }
+
+    .toggles { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .toggle { display: flex; align-items: flex-start; gap: 12px; padding: 10px 12px; cursor: pointer; }
+    .toggle + .toggle { border-top: 1px solid var(--border); }
+    .toggle .text { flex: 1; }
+    .toggle strong { display: block; font-weight: 600; }
+    .toggle small { display: block; margin-top: 2px; color: var(--muted); font-size: 11.5px; }
+    .toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .switch { flex: none; position: relative; width: 32px; height: 18px; margin-top: 1px; border-radius: 999px; background: var(--border); transition: background 0.15s; }
+    .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3); transition: transform 0.15s; }
+    .toggle input:checked + .switch { background: var(--green); }
+    .toggle input:checked + .switch::after { transform: translateX(14px); }
+    .toggle input:focus-visible + .switch { box-shadow: 0 0 0 3px var(--focus); }
   </style>
 </head>
 <body>
-  <nav id="tabs" hidden>
-    <button id="tab-links" type="button" aria-selected="true">Links on this page</button>
-    <button id="tab-settings" type="button" aria-selected="false">Settings</button>
-  </nav>
+  <header>
+    <img src="icon.png" alt="">
+    <span class="name">TorBox Send</span>
+    <nav id="tabs" class="tabs" hidden>
+      <button id="tab-links" type="button" aria-selected="true">Links</button>
+      <button id="tab-settings" type="button" aria-selected="false">Settings</button>
+    </nav>
+  </header>
 
   <main>
     <section id="links-view" hidden>
-      <ul id="links"></ul>
-      <div id="links-status">Looking for links…</div>
+      <ul id="links" class="links"></ul>
+      <p id="links-status" class="status">Looking for links…</p>
       <div class="links-footer">
-        <span class="hint">Green: click sends · Blue: hoster</span>
-        <button id="mark-links" type="button">Mark all on page</button>
+        <span id="legend" class="legend">click sends · hoster</span>
+        <button id="mark-links" type="button" class="btn sm">Mark all on page</button>
       </div>
     </section>
 
     <section id="settings-view">
-      <label for="api-key">TorBox API key</label>
-      <input id="api-key" type="password" autocomplete="off" spellcheck="false">
-      <button id="get-key" type="button">Get API key on torbox.app</button>
-      <div class="hint">Stored only in this browser; sent only to api.torbox.app.</div>
-      <button id="save">Save key</button>
+      <div class="field">
+        <label for="api-key">TorBox API key</label>
+        <div class="key-row">
+          <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key">
+          <button id="save" type="button" class="btn primary">Save</button>
+        </div>
+        <p class="hint">
+          Stored only in this browser; sent only to api.torbox.app.
+          <button id="get-key" type="button" class="link-btn">Get your key ↗</button>
+        </p>
+        <p id="status" class="status"></p>
+      </div>
 
-      <label><input id="auto-capture" type="checkbox"> Send magnet, .torrent and .nzb links to TorBox when clicked</label>
-      <div class="hint">Hold Ctrl/Cmd, Shift or Alt while clicking to open the link normally instead.</div>
-
-      <label><input id="hover-hint" type="checkbox"> Show a badge when hovering a link that a click will send</label>
-
-      <label><input id="include-stream-sites" type="checkbox"> Treat video &amp; social sites as hosters</label>
-      <div class="hint">YouTube, Twitter, Facebook, Instagram, TikTok… TorBox can download from them, but most such links aren't worth sending.</div>
-
-      <div id="status"></div>
+      <div class="toggles">
+        <label class="toggle">
+          <span class="text">
+            <strong>Send on click</strong>
+            <small>Clicking a magnet, .torrent or .nzb link sends it to TorBox. Hold ⌘/Ctrl, Shift or Alt to open it normally.</small>
+          </span>
+          <input id="auto-capture" type="checkbox"><span class="switch"></span>
+        </label>
+        <label class="toggle">
+          <span class="text">
+            <strong>Hover badge</strong>
+            <small>Show a small badge on links that a click will send.</small>
+          </span>
+          <input id="hover-hint" type="checkbox"><span class="switch"></span>
+        </label>
+        <label class="toggle">
+          <span class="text">
+            <strong>Video &amp; social sites</strong>
+            <small>Treat YouTube, Twitter, Facebook, TikTok… as hosters. Off: most such links aren't worth sending.</small>
+          </span>
+          <input id="include-stream-sites" type="checkbox"><span class="switch"></span>
+        </label>
+      </div>
     </section>
   </main>
 
