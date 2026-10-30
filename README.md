@@ -4,7 +4,9 @@ Minimal Firefox add-on that sends links to your TorBox account.
 
 - **Right-click any link → Send to TorBox.** Magnets and `.torrent` files become torrents, `.nzb` files become Usenet downloads, and everything else is sent as a web (hoster) download.
 - **Auto-capture.** Clicking a magnet, `.torrent` or `.nzb` link sends it to TorBox instead of opening it. Hold Ctrl/Cmd, Shift or Alt to click through normally.
-- **Toolbar button** opens the settings: API key and the auto-capture toggle.
+- **Hover badge.** With auto-capture on, hovering a link it will capture shows a small TorBox badge. Can be turned off.
+- **Mark sendable links on this page**: right-click anywhere on a page (or use the toolbar button) to put a cube next to every magnet, `.torrent` and `.nzb` link.
+- **Toolbar button** opens the settings: API key and toggles.
 
 ## What leaves your browser
 

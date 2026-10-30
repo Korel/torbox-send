@@ -1,5 +1,6 @@
 const API = "https://api.torbox.app/v1/api";
 const MENU_ID = "send-to-torbox";
+const MARK_MENU_ID = "mark-sendable-links";
 
 const TORRENT_TYPE = /application\/(x-)?bittorrent/i;
 const NZB_TYPE = /application\/(x-)?nzb/i;
@@ -119,10 +120,23 @@ async function sendAndReport(url, tabId) {
   }
 }
 
+async function markAndReport(tabId) {
+  let count;
+  try {
+    count = await browser.tabs.sendMessage(tabId, { type: "mark" });
+  } catch {
+    return report(tabId, "error", "Can't scan this page", "Reload it and try again.");
+  }
+  if (count) await report(tabId, "ok", `Marked ${count} sendable link${count === 1 ? "" : "s"}`, "Look for the cube next to each link.");
+  else await report(tabId, "ok", "Nothing to mark", "No magnet, .torrent or .nzb links on this page.");
+}
+
 function createMenu() {
-  browser.contextMenus.removeAll().then(() =>
-    browser.contextMenus.create({ id: MENU_ID, title: "Send to TorBox", contexts: ["link"] }),
-  );
+  browser.contextMenus.removeAll().then(() => {
+    browser.contextMenus.create({ id: MENU_ID, title: "Send to TorBox", contexts: ["link"] });
+    // Not on links, so a link's menu keeps a single "Send to TorBox" entry instead of a submenu.
+    browser.contextMenus.create({ id: MARK_MENU_ID, title: "Mark sendable links on this page", contexts: ["page", "frame", "selection"] });
+  });
 }
 
 browser.runtime.onInstalled.addListener(createMenu);
@@ -130,6 +144,7 @@ browser.runtime.onStartup.addListener(createMenu);
 
 browser.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_ID && info.linkUrl) sendAndReport(info.linkUrl, tab?.id);
+  if (info.menuItemId === MARK_MENU_ID && tab?.id >= 0) markAndReport(tab.id);
 });
 
 browser.runtime.onMessage.addListener((message, sender) => {

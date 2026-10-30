@@ -1,5 +1,6 @@
 const keyInput = document.getElementById("api-key");
 const autoCaptureInput = document.getElementById("auto-capture");
+const hoverHintInput = document.getElementById("hover-hint");
 const status = document.getElementById("status");
 
 function showStatus(text, isError = false) {
@@ -16,9 +17,28 @@ async function accountEmail(apiKey) {
   return body.data?.email;
 }
 
-browser.storage.local.get({ apiKey: "", autoCapture: true }).then(({ apiKey, autoCapture }) => {
-  keyInput.value = apiKey;
-  autoCaptureInput.checked = autoCapture;
+browser.storage.local.get({ apiKey: "", autoCapture: true, hoverHint: true }).then((stored) => {
+  keyInput.value = stored.apiKey;
+  autoCaptureInput.checked = stored.autoCapture;
+  hoverHintInput.checked = stored.hoverHint;
+});
+
+autoCaptureInput.addEventListener("change", () => browser.storage.local.set({ autoCapture: autoCaptureInput.checked }));
+hoverHintInput.addEventListener("change", () => browser.storage.local.set({ hoverHint: hoverHintInput.checked }));
+
+// The toolbar popup opens this page as options.html?popup; the about:addons copy has no page to scan.
+if (new URLSearchParams(location.search).has("popup")) {
+  document.getElementById("page-tools").hidden = false;
+}
+
+document.getElementById("mark-links").addEventListener("click", async () => {
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
+  try {
+    const count = await browser.tabs.sendMessage(tab.id, { type: "mark" });
+    showStatus(count ? `Marked ${count} link${count === 1 ? "" : "s"}.` : "No magnet, .torrent or .nzb links on this page.");
+  } catch {
+    showStatus("Can't scan this page. Reload it and try again.", true);
+  }
 });
 
 document.getElementById("get-key").addEventListener("click", () => {
@@ -27,10 +47,9 @@ document.getElementById("get-key").addEventListener("click", () => {
 
 document.getElementById("save").addEventListener("click", async () => {
   const apiKey = keyInput.value.trim();
-  await browser.storage.local.set({ autoCapture: autoCaptureInput.checked });
   if (!apiKey) {
     await browser.storage.local.remove("apiKey");
-    showStatus("Saved. No API key set.", true);
+    showStatus("API key removed.", true);
     return;
   }
   showStatus("Checking key…");

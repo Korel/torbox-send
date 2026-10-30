@@ -16,15 +16,21 @@
   </style>
 </head>
 <body>
+  <section id="page-tools" hidden>
+    <button id="mark-links" type="button">Mark sendable links on this page</button>
+  </section>
+
   <label for="api-key">TorBox API key</label>
   <input id="api-key" type="password" autocomplete="off" spellcheck="false">
   <button id="get-key" type="button">Get API key on torbox.app</button>
   <div class="hint">Stored only in this browser; sent only to api.torbox.app.</div>
+  <button id="save">Save key</button>
 
   <label><input id="auto-capture" type="checkbox"> Send magnet, .torrent and .nzb links to TorBox when clicked</label>
   <div class="hint">Hold Ctrl/Cmd, Shift or Alt while clicking to open the link normally instead.</div>
 
-  <button id="save">Save</button>
+  <label><input id="hover-hint" type="checkbox"> Show a badge when hovering a link that a click will send</label>
+
   <div id="status"></div>
 
   <script src="options.js"></script>
