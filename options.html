@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TorBox Send</title>
+  <style>
+    :root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
+    body { width: 22rem; margin: 1rem; }
+    label { display: block; margin-top: 1rem; }
+    input[type="password"] { width: 100%; box-sizing: border-box; padding: 0.4rem; font: inherit; }
+    button { margin-top: 1rem; padding: 0.4rem 1rem; font: inherit; }
+    #get-key { margin: 0.5rem 0 0.25rem; }
+    .hint { opacity: 0.7; font-size: 0.9em; }
+    #status { margin-top: 0.75rem; min-height: 1.5em; }
+    #status.error { color: #d33; }
+  </style>
+</head>
+<body>
+  <label for="api-key">TorBox API key</label>
+  <input id="api-key" type="password" autocomplete="off" spellcheck="false">
+  <button id="get-key" type="button">Get API key on torbox.app</button>
+  <div class="hint">Stored only in this browser; sent only to api.torbox.app.</div>
+
+  <label><input id="auto-capture" type="checkbox"> Send magnet, .torrent and .nzb links to TorBox when clicked</label>
+  <div class="hint">Hold Ctrl/Cmd, Shift or Alt while clicking to open the link normally instead.</div>
+
+  <button id="save">Save</button>
+  <div id="status"></div>
+
+  <script src="options.js"></script>
+</body>
+</html>

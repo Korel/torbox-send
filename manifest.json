@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "TorBox Send",
+  "version": "1.0.0",
+  "description": "Send magnet, .torrent, .nzb and hoster links to your TorBox account.",
+  "icons": { "96": "icon.png" },
+  "permissions": ["contextMenus", "notifications", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "scripts": ["background.js"] },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true
+    }
+  ],
+  "action": { "default_icon": "icon.png", "default_title": "TorBox Send", "default_popup": "options.html" },
+  "options_ui": { "page": "options.html" },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "torbox-send@korel",
+      "strict_min_version": "142.0",
+      "data_collection_permissions": {
+        "required": ["authenticationInfo", "websiteContent"]
+      }
+    }
+  }
+}
