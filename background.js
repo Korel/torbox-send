@@ -109,7 +109,10 @@ async function post(path, fields) {
 }
 
 async function send(url) {
-  if (url.startsWith("magnet:")) return post("/torrents/createtorrent", { magnet: url });
+  if (!(await browser.permissions.contains({ origins: ["<all_urls>"] }))) {
+    throw new Error("Website access is off. Open the TorBox Send popup and click Grant access.");
+  }
+  if (url.startsWith("magnet:"))return post("/torrents/createtorrent", { magnet: url });
 
   const file = await fetchTorrentOrNzb(url);
   if (file?.kind === "torrent") return post("/torrents/createtorrent", { file: [file.blob, file.name] });

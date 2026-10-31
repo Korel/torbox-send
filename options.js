@@ -20,6 +20,24 @@ async function accountEmail(apiKey) {
   return body.data?.email;
 }
 
+// --- Website access ---
+// Firefox lets users switch host permissions off; without them TorBox's CORS rules block the API calls.
+
+const ALL_SITES = { origins: ["<all_urls>"] };
+const accessBanner = document.getElementById("access-banner");
+
+async function updateAccessBanner() {
+  accessBanner.hidden = await browser.permissions.contains(ALL_SITES);
+}
+
+document.getElementById("grant-access").addEventListener("click", () => {
+  // Called directly in the click handler: Firefox only prompts in response to a user action.
+  browser.permissions.request(ALL_SITES).then(updateAccessBanner);
+});
+browser.permissions.onAdded.addListener(updateAccessBanner);
+browser.permissions.onRemoved.addListener(updateAccessBanner);
+updateAccessBanner();
+
 // --- Settings ---
 
 autoCaptureInput.addEventListener("change", () => browser.storage.local.set({ autoCapture: autoCaptureInput.checked }));
@@ -147,6 +165,10 @@ function addLinkRow(link, frameId) {
 }
 
 async function loadLinks() {
+  if (!(await browser.permissions.contains(ALL_SITES))) {
+    showStatus(linksStatus, "Grant website access above to list links.", true);
+    return;
+  }
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   pageTabId = tab.id;
   const requestId = crypto.randomUUID();
