@@ -2,6 +2,7 @@ const keyInput = document.getElementById("api-key");
 const autoCaptureInput = document.getElementById("auto-capture");
 const hoverHintInput = document.getElementById("hover-hint");
 const includeStreamSitesInput = document.getElementById("include-stream-sites");
+const autoCheckSitesInput = document.getElementById("auto-check-sites");
 const status = document.getElementById("status");
 const linksStatus = document.getElementById("links-status");
 const linksList = document.getElementById("links");
@@ -38,6 +39,55 @@ browser.permissions.onAdded.addListener(updateAccessBanner);
 browser.permissions.onRemoved.addListener(updateAccessBanner);
 updateAccessBanner();
 
+// --- Theme ---
+// theme.js applies a stored choice before first paint; without one the browser's preference wins.
+
+const themeToggle = document.getElementById("theme-toggle");
+const prefersDark = matchMedia("(prefers-color-scheme: dark)");
+const SUN_RAYS = "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4";
+const THEME_ICONS = {
+  light: [
+    ["circle", { cx: 12, cy: 12, r: 4 }],
+    ["path", { d: SUN_RAYS }],
+  ],
+  dark: [["path", { d: "M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z" }]],
+};
+const ICON_STYLE = { viewBox: "0 0 24 24", width: 16, height: 16, fill: "none", stroke: "currentColor", "stroke-width": 2 };
+
+function themeIcon(theme) {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  for (const [name, value] of Object.entries({ ...ICON_STYLE, "stroke-linecap": "round", "stroke-linejoin": "round" })) {
+    svg.setAttribute(name, value);
+  }
+  for (const [tag, attributes] of THEME_ICONS[theme]) {
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [name, value] of Object.entries(attributes)) shape.setAttribute(name, value);
+    svg.append(shape);
+  }
+  return svg;
+}
+
+const currentTheme = () => document.documentElement.dataset.theme || (prefersDark.matches ? "dark" : "light");
+
+// The icon shows where a click goes: a sun in dark mode, a moon in light mode.
+function showThemeToggle() {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  themeToggle.replaceChildren(themeIcon(next));
+  themeToggle.setAttribute("aria-label", `Switch to ${next} theme`);
+  themeToggle.title = `Switch to ${next} theme`;
+}
+
+themeToggle.addEventListener("click", () => {
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try {
+    localStorage.setItem("theme", next);
+  } catch {}
+  showThemeToggle();
+});
+prefersDark.addEventListener("change", showThemeToggle);
+showThemeToggle();
+
 // --- Settings ---
 
 autoCaptureInput.addEventListener("change", () => browser.storage.local.set({ autoCapture: autoCaptureInput.checked }));
@@ -45,6 +95,20 @@ hoverHintInput.addEventListener("change", () => browser.storage.local.set({ hove
 includeStreamSitesInput.addEventListener("change", () =>
   browser.storage.local.set({ includeStreamSites: includeStreamSitesInput.checked }),
 );
+
+let autoCheckSites = [];
+
+function setAutoCheckSites(sites) {
+  autoCheckSites = sites;
+  autoCheckSitesInput.value = sites.join("\n");
+  updateAutoCheckRow();
+}
+
+autoCheckSitesInput.addEventListener("change", () => {
+  const sites = parseSiteList(autoCheckSitesInput.value);
+  setAutoCheckSites(sites);
+  browser.storage.local.set({ autoCheckSites: sites });
+});
 
 document.getElementById("get-key").addEventListener("click", () => {
   browser.tabs.create({ url: "https://torbox.app/settings" });
@@ -82,14 +146,6 @@ function linkSubtitle(href) {
   }
 }
 
-function magnetName(href) {
-  try {
-    return new URL(href).searchParams.get("dn");
-  } catch {
-    return null;
-  }
-}
-
 function button(text, className, onClick) {
   const element = document.createElement("button");
   element.type = "button";
@@ -118,7 +174,74 @@ function cubeIcon(size, colors) {
   return svg;
 }
 
-document.getElementById("legend").replaceChildren(cubeIcon(12, GREEN_CUBE), "click sends", cubeIcon(12, BLUE_CUBE), "hoster");
+function boltIcon(size) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 32 32");
+  svg.setAttribute("width", size);
+  svg.setAttribute("height", size);
+  const bolt = document.createElementNS(SVG_NS, "polygon");
+  bolt.setAttribute("points", "18,2 6,18 15,18 13,30 26,13 17,13");
+  bolt.setAttribute("fill", "#f5b301");
+  bolt.setAttribute("stroke", "#9a6b00");
+  bolt.setAttribute("stroke-width", "1.5");
+  svg.append(bolt);
+  return svg;
+}
+
+document.getElementById("legend").replaceChildren(
+  cubeIcon(12, GREEN_CUBE), "click sends", cubeIcon(12, BLUE_CUBE), "hoster", boltIcon(12), "cached",
+);
+
+const LINK_KINDS = [
+  ["magnet", "Magnets"],
+  ["torrent", ".torrent"],
+  ["other", "Other"],
+];
+const kindsBar = document.getElementById("kinds");
+const rows = []; // { link, kind, hash, item, title, subtitle }
+let activeKind = null;
+
+function linkKind(link) {
+  if (link.isPage) return "page";
+  if (link.href.startsWith("magnet:")) return "magnet";
+  return /\.torrent$/i.test(linkSubtitle(link.href)) ? "torrent" : "other";
+}
+
+// A .torrent named "download" gets the name of the magnet with the same hash, possibly from another frame.
+function nameRows() {
+  const magnetNames = new Map();
+  for (const row of rows) {
+    const name = row.kind === "magnet" && row.hash && magnetDisplayName(row.link.href);
+    if (name) magnetNames.set(row.hash, name);
+  }
+  for (const row of rows) {
+    const name = row.kind === "magnet" || row.kind === "torrent" ? linkTitle(row.link, magnetNames) : row.link.text;
+    row.title.textContent = name || linkSubtitle(row.link.href);
+  }
+}
+
+function showKinds() {
+  const counts = new Map(LINK_KINDS.map(([kind]) => [kind, 0]));
+  for (const row of rows) if (counts.has(row.kind)) counts.set(row.kind, counts.get(row.kind) + 1);
+  const present = LINK_KINDS.filter(([kind]) => counts.get(kind));
+  if (!counts.get(activeKind)) activeKind = present[0]?.[0] ?? null;
+
+  kindsBar.hidden = present.length < 2;
+  kindsBar.replaceChildren(
+    ...present.map(([kind, label]) => {
+      const count = Object.assign(document.createElement("span"), { className: "count", textContent: counts.get(kind) });
+      const tab = button("", "", () => {
+        activeKind = kind;
+        showKinds();
+      });
+      tab.dataset.kind = kind;
+      tab.setAttribute("aria-selected", String(kind === activeKind));
+      tab.append(`${label} `, count);
+      return tab;
+    }),
+  );
+  for (const row of rows) row.item.hidden = row.kind !== "page" && row.kind !== activeKind;
+}
 
 function addLinkRow(link, frameId) {
   const row = document.createElement("li");
@@ -132,7 +255,6 @@ function addLinkRow(link, frameId) {
   text.className = "link-text";
   const title = document.createElement("div");
   title.className = "link-title";
-  title.textContent = (link.href.startsWith("magnet:") && magnetName(link.href)) || link.text || linkSubtitle(link.href);
   title.title = link.href;
   const subtitle = document.createElement("div");
   subtitle.className = "link-sub";
@@ -162,7 +284,75 @@ function addLinkRow(link, frameId) {
     row.append(show);
   }
   linksList.append(row);
+  rows.push({ link, kind: linkKind(link), hash: linkHash(link.href), item: row, title, subtitle });
 }
+
+// Rows whose hash is known without downloading: magnets and hash-named .torrent links.
+const hashedRows = () => rows.filter((row) => row.hash);
+
+// knownOnly: show answers the background already has, without asking TorBox.
+async function tagCachedRows(checkedRows, { knownOnly = false } = {}) {
+  const urls = checkedRows.map((row) => row.link.href);
+  const answers = await browser.runtime.sendMessage({ type: "check-cached", urls, knownOnly });
+  if (!Array.isArray(answers)) return [];
+  checkedRows.forEach(({ subtitle }, i) => {
+    if (answers[i] !== true || subtitle.querySelector(".tag.cached")) return;
+    const tag = document.createElement("span");
+    tag.className = "tag cached";
+    tag.textContent = "⚡ cached";
+    tag.title = "Already cached on TorBox: adds instantly";
+    subtitle.prepend(tag);
+  });
+  return answers;
+}
+
+// Counts releases, not links: a magnet and its .torrent share one hash.
+function showCacheResult(checkedRows, answers) {
+  const cached = new Set(checkedRows.filter((_, i) => answers[i] === true).map((row) => row.hash)).size;
+  const allKnown = answers.length > 0 && answers.every((answer) => answer !== null);
+  checkCacheButton.textContent = allKnown ? (cached ? `⚡ ${cached} cached` : "None cached") : "Check cache";
+  checkCacheButton.disabled = allKnown;
+}
+
+const checkCacheButton = document.getElementById("check-cache");
+
+// Hashes already answered come from the background's store, so re-running only asks TorBox about new ones.
+async function checkCache() {
+  checkCacheButton.disabled = true;
+  checkCacheButton.textContent = "Checking…";
+  const checkedRows = hashedRows();
+  const answers = await tagCachedRows(checkedRows);
+  if (answers.some((answer) => answer !== null)) return showCacheResult(checkedRows, answers);
+  checkCacheButton.textContent = "Check failed";
+  checkCacheButton.disabled = false;
+}
+
+checkCacheButton.addEventListener("click", checkCache);
+
+// --- Automatic cache checks for the current site (toolbar popup only) ---
+
+const autoCheckRow = document.getElementById("auto-check");
+const autoCheckText = document.getElementById("auto-check-text");
+const autoCheckToggle = document.getElementById("auto-check-toggle");
+let pageHost = null;
+
+function updateAutoCheckRow() {
+  autoCheckRow.hidden = !pageHost;
+  if (!pageHost) return;
+  const on = hostMatches(pageHost, autoCheckSites);
+  const site = pageHost.replace(/^www\./, "");
+  autoCheckText.textContent = on ? `Cache check on ${site}: when the popup opens.` : `Cache check on ${site}: on demand.`;
+  autoCheckToggle.textContent = on ? "Check only on demand" : "Check when the popup opens";
+}
+
+autoCheckToggle.addEventListener("click", () => {
+  const host = parseSiteList(pageHost)[0];
+  const sites = hostMatches(pageHost, autoCheckSites)
+    ? autoCheckSites.filter((site) => !hostMatches(pageHost, [site]))
+    : [...autoCheckSites, host];
+  setAutoCheckSites(sites);
+  browser.storage.local.set({ autoCheckSites: sites });
+});
 
 async function loadLinks() {
   if (!(await browser.permissions.contains(ALL_SITES))) {
@@ -171,16 +361,23 @@ async function loadLinks() {
   }
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   pageTabId = tab.id;
+  if (/^https?:/.test(tab.url || "")) pageHost = new URL(tab.url).hostname;
+  updateAutoCheckRow();
   const requestId = crypto.randomUUID();
   let topFrameAnswered = false;
 
   const pageIsSendable = tab.url && (await browser.runtime.sendMessage({ type: "is-sendable-page", url: tab.url }));
-  if (pageIsSendable) addLinkRow({ href: tab.url, text: tab.title, clickable: false, hidden: false, isPage: true });
+  if (pageIsSendable) {
+    addLinkRow({ href: tab.url, text: tab.title, clickable: false, hidden: false, isPage: true });
+    nameRows();
+  }
 
   browser.runtime.onMessage.addListener((message, sender) => {
     if (message?.type !== "links" || message.requestId !== requestId || sender.tab?.id !== pageTabId) return;
     if (sender.frameId === 0) topFrameAnswered = true;
     for (const link of message.links) addLinkRow(link, sender.frameId);
+    nameRows();
+    showKinds();
     linkCount += message.links.length;
     const other = pageIsSendable ? " other" : "";
     showStatus(
@@ -189,6 +386,13 @@ async function loadLinks() {
         ? `${linkCount}${other} sendable link${linkCount === 1 ? "" : "s"} on this page.`
         : `No${other} magnet, .torrent, .nzb or hoster links on this page.`,
     );
+
+    const checkedRows = hashedRows();
+    checkCacheButton.hidden = checkedRows.length === 0;
+    if (!checkedRows.length) return;
+    if (pageHost && hostMatches(pageHost, autoCheckSites)) checkCache();
+    // Elsewhere only restores earlier answers (e.g. from a previous popup), without a request to TorBox.
+    else tagCachedRows(checkedRows, { knownOnly: true }).then((answers) => showCacheResult(checkedRows, answers));
   });
 
   browser.tabs.sendMessage(pageTabId, { type: "list", requestId }).catch(() => {});
@@ -196,17 +400,6 @@ async function loadLinks() {
     if (!topFrameAnswered) showStatus(linksStatus, "Can't read this page. Reload it and try again.", true);
   }, 1500);
 }
-
-const markButton = document.getElementById("mark-links");
-markButton.addEventListener("click", async () => {
-  try {
-    await browser.tabs.sendMessage(pageTabId, { type: "mark" });
-    markButton.textContent = "Marked";
-  } catch {
-    markButton.textContent = "Can't mark this page";
-  }
-  markButton.disabled = true;
-});
 
 function selectTab(name) {
   for (const view of ["links", "settings"]) {
@@ -218,11 +411,13 @@ function selectTab(name) {
 document.getElementById("tab-links").addEventListener("click", () => selectTab("links"));
 document.getElementById("tab-settings").addEventListener("click", () => selectTab("settings"));
 
-browser.storage.local.get({ apiKey: "", autoCapture: true, hoverHint: true, includeStreamSites: false }).then((stored) => {
+const DEFAULTS = { apiKey: "", autoCapture: true, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
+browser.storage.local.get(DEFAULTS).then((stored) => {
   keyInput.value = stored.apiKey;
   autoCaptureInput.checked = stored.autoCapture;
   hoverHintInput.checked = stored.hoverHint;
   includeStreamSitesInput.checked = stored.includeStreamSites;
+  setAutoCheckSites(stored.autoCheckSites);
 
   // The toolbar popup opens this page as options.html?popup; the about:addons copy has no page to list.
   if (new URLSearchParams(location.search).has("popup")) {

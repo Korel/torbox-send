@@ -1,6 +1,5 @@
 const API = "https://api.torbox.app/v1/api";
 const MENU_ID = "send-to-torbox";
-const MARK_MENU_ID = "mark-sendable-links";
 const SEND_PAGE_MENU_ID = "send-page-to-torbox";
 
 const TORRENT_TYPE = /application\/(x-)?bittorrent/i;
@@ -135,6 +134,48 @@ async function isSendable(url, { failOpen = true } = {}) {
   return hosterRules.some((rule) => (includeStreamSites || !rule.stream) && rule.regex.test(url));
 }
 
+const CACHE_CHECK_BATCH = 100;
+const CACHE_CHECK_TTL_MS = 10 * 60 * 1000;
+// hash -> { cached, at }; mirrored to storage.session because the event page can be suspended.
+const cacheChecksReady = browser.storage.session.get("cacheChecks").then(({ cacheChecks }) => cacheChecks || {});
+
+async function checkCachedBatch(hashes, apiKey) {
+  const res = await fetch(`${API}/torrents/checkcached?format=list&list_files=false`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ hashes }),
+  });
+  if (!res.ok) throw new Error(`TorBox answered HTTP ${res.status}`);
+  return cachedHashes(await res.json());
+}
+
+// One answer per url, in order: true/false, or null when unknown (not a magnet, no key, API error).
+// knownOnly answers from earlier checks without asking TorBox.
+async function checkCached(urls, { knownOnly = false } = {}) {
+  const cacheChecks = await cacheChecksReady;
+  const now = Date.now();
+  if (knownOnly) return knownAnswers(urls, cacheChecks, now, CACHE_CHECK_TTL_MS);
+
+  const hashes = urls.map(linkHash);
+  const { apiKey } = await browser.storage.local.get("apiKey");
+  if (!apiKey) return hashes.map(() => null);
+
+  for (const [hash, entry] of Object.entries(cacheChecks)) {
+    if (now - entry.at > CACHE_CHECK_TTL_MS) delete cacheChecks[hash];
+  }
+  const unchecked = [...new Set(hashes.filter((hash) => hash && !(hash in cacheChecks)))];
+  await Promise.all(
+    chunk(unchecked, CACHE_CHECK_BATCH).map(async (batch) => {
+      try {
+        const cached = await checkCachedBatch(batch, apiKey);
+        for (const hash of batch) cacheChecks[hash] = { cached: cached.has(hash), at: now };
+      } catch {}
+    }),
+  );
+  if (unchecked.length) await browser.storage.session.set({ cacheChecks });
+  return knownAnswers(urls, cacheChecks, now, CACHE_CHECK_TTL_MS);
+}
+
 function displayName(url) {
   if (url.startsWith("magnet:")) {
     try {
@@ -173,24 +214,10 @@ async function sendAndReport(url, tabId) {
   }
 }
 
-async function markAndReport(tabId) {
-  let counts;
-  try {
-    counts = await browser.tabs.sendMessage(tabId, { type: "mark" });
-  } catch {
-    return report(tabId, "error", "Can't scan this page", "Reload it and try again.");
-  }
-  if (!counts?.total) return report(tabId, "ok", "Nothing to mark", "No magnet, .torrent, .nzb or hoster links on this page.");
-  const title = `Marked ${counts.total} sendable link${counts.total === 1 ? "" : "s"}`;
-  const detail = counts.hosters ? "Green: click to send. Blue: right-click → Send to TorBox." : "Click a marked link to send it.";
-  await report(tabId, "ok", title, detail);
-}
-
 function createMenu() {
   browser.menus.removeAll().then(() => {
     browser.menus.create({ id: MENU_ID, title: "Send to TorBox", contexts: ["link"] });
     // Not on links, so a link's menu keeps a single "Send to TorBox" entry instead of a submenu.
-    browser.menus.create({ id: MARK_MENU_ID, title: "Mark sendable links on this page", contexts: ["page", "frame", "selection"] });
     browser.menus.create({ id: SEND_PAGE_MENU_ID, title: "Send this page to TorBox", contexts: ["page", "frame", "selection"], visible: false });
   });
 }
@@ -213,12 +240,15 @@ browser.menus.onShown.addListener(async (info) => {
 browser.menus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_ID && info.linkUrl) sendAndReport(info.linkUrl, tab?.id);
   if (info.menuItemId === SEND_PAGE_MENU_ID && info.pageUrl) sendAndReport(info.pageUrl, tab?.id);
-  if (info.menuItemId === MARK_MENU_ID && tab?.id >= 0) markAndReport(tab.id);
 });
 
 // Content scripts send from their own tab; the popup has no tab and passes the page's tab along.
 browser.runtime.onMessage.addListener((message, sender) => {
-  if (sender.id !== browser.runtime.id || typeof message?.url !== "string") return;
+  if (sender.id !== browser.runtime.id) return;
+  if (message?.type === "check-cached" && Array.isArray(message.urls)) {
+    return checkCached(message.urls.map(String), { knownOnly: message.knownOnly === true });
+  }
+  if (typeof message?.url !== "string") return;
   if (message.type === "send") return sendAndReport(message.url, sender.tab?.id ?? message.tabId);
   if (message.type === "is-sendable-page") return isSendable(message.url, { failOpen: false });
 });

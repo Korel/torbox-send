@@ -1,4 +1,4 @@
-const settings = { autoCapture: true, hoverHint: true, includeStreamSites: false };
+const settings = { autoCapture: true, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
 let hosterEntries = [];
 let hosterRules = null; // compiled on first use
 
@@ -44,7 +44,6 @@ function capturableLink(event) {
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 const GREEN_CUBE = ["#8cdc78", "#3cac6c", "#1c8062"];
-const BLUE_CUBE = ["#8cc8f0", "#3c8cd0", "#1c5c9c"];
 
 function cubeIcon(size, colors = GREEN_CUBE) {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -109,7 +108,31 @@ hintBox.append(cubeIcon(14), hintLabel);
 const hintHost = shadowHost("div", { position: "fixed", zIndex: "2147483647", pointerEvents: "none" }, hintBox);
 let hintedLink = null;
 
+const HINT = "Click: send to TorBox";
+const CACHED_HINT = "Click: send to TorBox · ⚡ cached";
+const HOVER_CHECK_DELAY_MS = 400; // only links the pointer rests on, so a sweep down a list asks nothing
+let hoverCheckTimer = null;
+
+// knownOnly asks the background for earlier answers (e.g. the popup's Check cache), sending nothing to TorBox.
+async function askCached(link, knownOnly) {
+  const answers = await browser.runtime
+    .sendMessage({ type: "check-cached", urls: [link.href], knownOnly })
+    .catch(() => null);
+  const cached = answers?.[0] ?? null;
+  if (cached && hintedLink === link) hintLabel.textContent = CACHED_HINT;
+  return cached;
+}
+
+async function showHintCacheState(link) {
+  hintLabel.textContent = HINT;
+  if (!linkHash(link.href)) return;
+  const known = await askCached(link, true);
+  if (known !== null || hintedLink !== link || !hostMatches(location.hostname, settings.autoCheckSites || [])) return;
+  hoverCheckTimer = setTimeout(() => hintedLink === link && askCached(link, false), HOVER_CHECK_DELAY_MS);
+}
+
 function hideHint() {
+  clearTimeout(hoverCheckTimer);
   hintedLink = null;
   hintHost.remove();
 }
@@ -121,20 +144,27 @@ document.addEventListener(
     const link = capturableLink(event);
     if (!link) return hideHint();
     if (link === hintedLink) return;
+    clearTimeout(hoverCheckTimer);
     hintedLink = link;
+    showHintCacheState(link);
     hintHost.style.left = `${Math.min(event.clientX + 12, innerWidth - 170)}px`;
     hintHost.style.top = `${Math.min(event.clientY + 16, innerHeight - 30)}px`;
     document.documentElement.append(hintHost);
   },
   true,
 );
-document.addEventListener("scroll", hideHint, true);
+// Only scrolls that move the hovered link: self-scrolling carousels fire scroll events non-stop.
+document.addEventListener(
+  "scroll",
+  (event) => {
+    if (hintedLink && (event.target === document || event.target.contains?.(hintedLink))) hideHint();
+  },
+  true,
+);
 document.documentElement.addEventListener("mouseleave", hideHint);
 
-const markedLinks = new WeakSet();
-
 // TorBox's hoster patterns cover whole domains (github.com, youtube.com), so on those sites
-// every internal link would match; only links leaving the current site get a hoster mark.
+// every internal link would match; only links leaving the current site count as hoster links.
 function isOtherSiteHosterLink(link) {
   return link.hostname.replace(/^www\./, "") !== location.hostname.replace(/^www\./, "") && isHosterLink(link.href);
 }
@@ -145,21 +175,6 @@ function sendableLinks() {
     if (isOtherSiteHosterLink(link)) return [{ link, clickable: false }];
     return [];
   });
-}
-
-function markLinks() {
-  const counts = { total: 0, hosters: 0 };
-  for (const { link, clickable } of sendableLinks()) {
-    counts.total++;
-    if (!clickable) counts.hosters++;
-    if (markedLinks.has(link)) continue;
-    markedLinks.add(link);
-    const icon = cubeIcon(14, clickable ? GREEN_CUBE : BLUE_CUBE);
-    const marker = shadowHost("span", { display: "inline-block", verticalAlign: "middle", marginLeft: "4px" }, icon);
-    marker.title = clickable ? "Click to send to TorBox" : "Hoster link: right-click → Send to TorBox";
-    link.after(marker);
-  }
-  return counts;
 }
 
 let listedLinks = [];
@@ -174,6 +189,7 @@ function reportLinks(requestId) {
     clickable,
     href: link.href,
     text: link.textContent.trim().replace(/\s+/g, " ").slice(0, 120),
+    title: link.title.trim().slice(0, 120),
     hidden: link.getClientRects().length === 0,
   }));
   browser.runtime.sendMessage({ type: "links", requestId, links }).catch(() => {});
@@ -191,11 +207,6 @@ browser.runtime.onMessage.addListener((message) => {
   if (message?.type === "toast") showToast(message);
   if (message?.type === "list") reportLinks(message.requestId);
   if (message?.type === "reveal") revealLink(listedLinks[message.index]);
-  if (message?.type === "mark") {
-    const counts = markLinks();
-    // Only the top frame always answers, so the popup gets a reply even when no frame has matches.
-    if (counts.total || window === window.top) return Promise.resolve(counts);
-  }
 });
 
 document.addEventListener(
