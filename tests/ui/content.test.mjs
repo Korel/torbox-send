@@ -164,3 +164,17 @@ test("on a listed site, a hover made by the page's own script checks nothing", a
   assert.deepEqual(await page.evaluate(() => window.sentMessages), []);
   await page.close();
 });
+
+test("hover badge stays clear of an always-visible scrollbar", async () => {
+  const page = await openPage({ knownCached: "a{40}" });
+  // Headless Firefox draws overlay scrollbars, so stand in for one that takes 15px of the window.
+  await page.evaluate(() => {
+    Object.defineProperty(document.documentElement, "clientWidth", { get: () => innerWidth - 15 });
+    Object.defineProperty(document.documentElement, "clientHeight", { get: () => innerHeight - 15 });
+  });
+  await page.hover("#edge-magnet");
+  await page.waitForTimeout(100);
+  const box = await badgeBox(page);
+  assert.ok(box.right <= box.width - 15, `badge ends at ${box.right}px; the scrollbar starts at ${box.width - 15}px`);
+  await page.close();
+});

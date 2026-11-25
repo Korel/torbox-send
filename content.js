@@ -63,6 +63,14 @@ function shadowHost(tag, hostStyle, ...children) {
   return host;
 }
 
+// clientWidth/Height leave out scrollbars, which innerWidth/Height include.
+function visibleSize() {
+  return {
+    width: Math.min(innerWidth, document.documentElement.clientWidth),
+    height: Math.min(innerHeight, document.documentElement.clientHeight),
+  };
+}
+
 const TOAST_COLORS = { pending: "#2b3440", ok: "#0f7a55", error: "#b3261e" };
 const toastBox = document.createElement("div");
 Object.assign(toastBox.style, {
@@ -103,8 +111,9 @@ let hintPointer = { x: 0, y: 0 };
 // Measured, not assumed: the label grows when the link turns out to be cached.
 function placeHint() {
   const { width, height } = hintBox.getBoundingClientRect();
-  hintHost.style.left = `${Math.max(0, Math.min(hintPointer.x + 12, innerWidth - width - 4))}px`;
-  hintHost.style.top = `${Math.max(0, Math.min(hintPointer.y + 16, innerHeight - height - 4))}px`;
+  const visible = visibleSize();
+  hintHost.style.left = `${Math.max(0, Math.min(hintPointer.x + 12, visible.width - width - 4))}px`;
+  hintHost.style.top = `${Math.max(0, Math.min(hintPointer.y + 16, visible.height - height - 4))}px`;
 }
 
 const HINT = "Click: send to TorBox";
