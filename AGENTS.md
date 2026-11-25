@@ -21,3 +21,15 @@ background.js, content.js and options.js.
   Keep README's "What leaves your browser" table exact whenever a request changes.
 - No new permissions or hosts without asking.
 - Don't bump the version, sign, or release unless asked.
+
+## Sign a build (only when asked)
+1. Create API credentials at <https://addons.mozilla.org/developers/addon/api/key/>.
+2. Bump `version` in `manifest.json` (every signed upload needs a new version).
+3. Run:
+
+   ```sh
+   WEB_EXT_API_KEY=user:… WEB_EXT_API_SECRET=… \
+     npx web-ext sign --channel=unlisted
+   ```
+
+4. The signed `.xpi` lands in `web-ext-artifacts/`; attach it to the GitHub release.

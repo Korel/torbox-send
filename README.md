@@ -1,6 +1,17 @@
 # TorBox Send
 
-Minimal Firefox add-on that sends links to your TorBox account.
+Minimal Firefox add-on that sends links to your [TorBox](https://torbox.app) account.
+
+> Unofficial. This project is not affiliated with, endorsed by or supported by TorBox.
+
+## Install
+
+1. Download the latest `.xpi` from [Releases](https://github.com/Korel/torbox-send/releases/latest) and open it in Firefox 142 or newer. The builds are signed by Mozilla, so they install permanently.
+2. Click the toolbar button, open **Settings** and paste your TorBox API key.
+
+Firefox does not update add-ons installed this way; install the newer `.xpi` over the old one.
+
+## Features
 
 - **Right-click a link → Send to TorBox.** Magnets and `.torrent` files become torrents, `.nzb` files become Usenet downloads, and links to hosters TorBox supports (Mega, 1Fichier, …) become web downloads. The item is hidden on other links. Video and social sites from TorBox's list (YouTube, Twitter, Facebook, …) are ignored unless enabled in Settings.
 - **Auto-capture.** Clicking a magnet, `.torrent` or `.nzb` link sends it to TorBox instead of opening it. Hold Ctrl/Cmd, Shift or Alt to click through normally.
@@ -33,15 +44,6 @@ npx web-ext run          # temporary Firefox profile with the add-on loaded
 Popup tests write screenshots to `test-results/ui/`; look at them after UI changes.
 `web-ext-config.cjs` keeps dev files out of the packaged add-on.
 
-## Sign for permanent install (unlisted, private)
+## License
 
-1. Create API credentials at <https://addons.mozilla.org/developers/addon/api/key/>.
-2. Bump `version` in `manifest.json` (every signed upload needs a new version).
-3. Run:
-
-   ```sh
-   WEB_EXT_API_KEY=user:… WEB_EXT_API_SECRET=… \
-     npx web-ext sign --channel=unlisted
-   ```
-
-4. Open the signed `.xpi` from `web-ext-artifacts/` in Firefox to install it.
+[MIT](LICENSE)
