@@ -27,15 +27,6 @@ function isHosterLink(href) {
   return hosterRules.some((rule) => (settings.includeStreamSites || !rule.stream) && rule.regex.test(href));
 }
 
-function isCapturable(href) {
-  if (href.startsWith("magnet:")) return true;
-  try {
-    return /\.(torrent|nzb(\.gz)?)$/i.test(new URL(href).pathname);
-  } catch {
-    return false;
-  }
-}
-
 function capturableLink(event) {
   const link = event.composedPath().find((el) => el.localName === "a" && typeof el.href === "string" && el.href);
   return link && isCapturable(link.href) ? link : null;
@@ -151,7 +142,8 @@ function hideHint() {
 document.addEventListener(
   "mouseover",
   (event) => {
-    if (!settings.autoCapture || !settings.hoverHint) return;
+    // Untrusted events come from the page's own script, which must not be able to make us ask TorBox.
+    if (!event.isTrusted || !settings.autoCapture || !settings.hoverHint) return;
     const link = capturableLink(event);
     if (!link) return hideHint();
     if (link === hintedLink) return;
@@ -224,6 +216,8 @@ document.addEventListener(
   "click",
   (event) => {
     hideHint();
+    // Only the user's own clicks: a page's script could otherwise send links by calling link.click().
+    if (!event.isTrusted) return;
     // Modifier-clicks pass through so the link can still be opened or downloaded normally.
     if (!settings.autoCapture || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     const link = capturableLink(event);

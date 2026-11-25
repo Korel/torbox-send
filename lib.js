@@ -37,6 +37,20 @@ function linkHash(url) {
   }
 }
 
+function isWebUrl(url) {
+  try {
+    return /^https?:$/.test(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
+// Links a plain click sends: magnets, and http(s) links to .torrent/.nzb files.
+function isCapturable(href) {
+  if (href.startsWith("magnet:")) return true;
+  return isWebUrl(href) && /\.(torrent|nzb(\.gz)?)$/i.test(new URL(href).pathname);
+}
+
 const GENERIC_WORDS = new Set(["download", "dl", "get", "torrent", "magnet", "link", "file", "mirror", "here", "click"]);
 
 // True for labels like "download .torrent" or a bare site name, which say nothing about the release.
@@ -115,6 +129,28 @@ function hostMatches(hostname, sites) {
   return sites.some((site) => host === site || host.endsWith(`.${site}`));
 }
 
+// The response body as a Blob; rejects with { tooLarge: true } past maxBytes, without buffering the rest.
+async function readCapped(res, maxBytes) {
+  const tooLarge = () =>
+    Object.assign(new Error(`File is larger than ${Math.round(maxBytes / (1024 * 1024))} MB.`), { tooLarge: true });
+  if (Number(res.headers.get("content-length")) > maxBytes) throw tooLarge();
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      throw tooLarge();
+    }
+    chunks.push(value);
+  }
+  return new Blob(chunks, { type: res.headers.get("content-type") || "" });
+}
+
 if (typeof module === "object") {
   module.exports = {
     magnetHash,
@@ -126,5 +162,8 @@ if (typeof module === "object") {
     parseSiteList,
     hostMatches,
     knownAnswers,
+    isWebUrl,
+    isCapturable,
+    readCapped,
   };
 }

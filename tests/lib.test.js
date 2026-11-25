@@ -10,6 +10,9 @@ const {
   parseSiteList,
   hostMatches,
   knownAnswers,
+  isWebUrl,
+  isCapturable,
+  readCapped,
 } = require("../lib.js");
 
 const HEX = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
@@ -108,4 +111,63 @@ test("linkTitle uses a magnet's dn, else its text", () => {
   const none = new Map();
   assert.equal(linkTitle({ href: `magnet:?xt=urn:btih:${HEX}&dn=Some+Name`, text: "magnet", title: "" }, none), "Some Name");
   assert.equal(linkTitle({ href: `magnet:?xt=urn:btih:${HEX}`, text: "Some Name", title: "" }, none), "Some Name");
+});
+
+test("isCapturable takes magnets and http(s) .torrent/.nzb links", () => {
+  assert.equal(isCapturable(`magnet:?xt=urn:btih:${HEX}`), true);
+  assert.equal(isCapturable("https://example.org/dl/a.torrent?key=1"), true);
+  assert.equal(isCapturable("http://example.org/a.NZB"), true);
+  assert.equal(isCapturable("https://example.org/a.nzb.gz"), true);
+  assert.equal(isCapturable("https://example.org/a.zip"), false);
+});
+
+test("isCapturable refuses .torrent links that are not http(s)", () => {
+  assert.equal(isCapturable("data:text/plain,x.torrent"), false);
+  assert.equal(isCapturable("file:///home/me/a.torrent"), false);
+  assert.equal(isCapturable("ftp://example.org/a.torrent"), false);
+  assert.equal(isCapturable("not a url.torrent"), false);
+});
+
+test("isWebUrl is true only for http and https", () => {
+  assert.equal(isWebUrl("https://mega.nz/file/abc"), true);
+  assert.equal(isWebUrl("http://example.org/"), true);
+  assert.equal(isWebUrl("data:text/html,hi"), false);
+  assert.equal(isWebUrl("file:///etc/passwd"), false);
+  assert.equal(isWebUrl("nonsense"), false);
+});
+
+const streamOf = (chunks, onCancel = () => {}) =>
+  new ReadableStream({
+    pull(controller) {
+      if (chunks.length) controller.enqueue(chunks.shift());
+      else controller.close();
+    },
+    cancel: onCancel,
+  });
+
+test("readCapped returns the body with its content type when it fits", async () => {
+  const res = new Response(streamOf([new Uint8Array([1, 2]), new Uint8Array([3])]), {
+    headers: { "content-type": "application/x-bittorrent" },
+  });
+  const blob = await readCapped(res, 3);
+  assert.deepEqual([...new Uint8Array(await blob.arrayBuffer())], [1, 2, 3]);
+  assert.equal(blob.type, "application/x-bittorrent");
+});
+
+test("readCapped refuses on Content-Length alone, without reading", async () => {
+  let pulled = false;
+  const body = new ReadableStream({ pull: () => (pulled = true) }, { highWaterMark: 0 });
+  const res = new Response(body, { headers: { "content-length": String(50 * 1024 * 1024 + 1) } });
+  await assert.rejects(readCapped(res, 50 * 1024 * 1024), { tooLarge: true, message: "File is larger than 50 MB." });
+  assert.equal(pulled, false);
+});
+
+test("readCapped stops reading a body that outgrows the cap", async () => {
+  let cancelled = false;
+  const endless = new ReadableStream({
+    pull: (controller) => controller.enqueue(new Uint8Array(4)),
+    cancel: () => (cancelled = true),
+  });
+  await assert.rejects(readCapped(new Response(endless), 10), { tooLarge: true });
+  assert.equal(cancelled, true);
 });

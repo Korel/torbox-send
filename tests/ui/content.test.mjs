@@ -130,3 +130,37 @@ test("hover badge stays inside the window next to the right edge, also once it s
   assert.ok(box.left >= 0);
   await page.close();
 });
+
+const sends = (page) => page.evaluate(() => window.sentMessages.filter((m) => m.type === "send"));
+// Stands in for the browser's own handling, so an uncaptured magnet click goes nowhere.
+const ignoreUncapturedClicks = (page) =>
+  page.evaluate(() => document.addEventListener("click", (event) => event.preventDefault()));
+
+test("a real click on a magnet sends it", async () => {
+  const page = await openPage();
+  await page.click("#plain-magnet");
+  assert.deepEqual((await sends(page)).map((m) => m.url.slice(0, 60)), ["magnet:?xt=urn:btih:" + "b".repeat(40)]);
+  await page.close();
+});
+
+test("a click made by the page's own script sends nothing", async () => {
+  const page = await openPage();
+  await ignoreUncapturedClicks(page);
+  await page.evaluate(() => {
+    document.getElementById("plain-magnet").click();
+    document.getElementById("cached-magnet").dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0 }));
+  });
+  assert.deepEqual(await sends(page), []);
+  await page.close();
+});
+
+test("on a listed site, a hover made by the page's own script checks nothing", async () => {
+  const page = await openPage({ storedSettings: LISTED });
+  await page.evaluate(() =>
+    document.getElementById("cached-magnet").dispatchEvent(new MouseEvent("mouseover", { bubbles: true, clientX: 50, clientY: 50 })),
+  );
+  await page.waitForTimeout(600);
+  assert.deepEqual(await realChecks(page), []);
+  assert.deepEqual(await page.evaluate(() => window.sentMessages), []);
+  await page.close();
+});

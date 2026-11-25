@@ -7,6 +7,8 @@ const NZB_TYPE = /application\/(x-)?nzb/i;
 const TORRENT_NAME = /\.torrent$/i;
 const NZB_NAME = /\.nzb(\.gz)?$/i;
 
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // .torrent and .nzb files are far smaller; stops runaway downloads
+
 const HOSTERS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 let hosterRules = null; // [{ regex, stream }]; null until a list was ever fetched
 
@@ -80,9 +82,11 @@ async function fetchTorrentOrNzb(url) {
     const res = await fetch(url, { credentials: "include", signal: controller.signal });
     const name = responseFileName(res, url);
     const kind = res.ok ? fileKind(res, name) : null;
-    if (kind) return { kind, name, blob: await res.blob() };
+    if (kind) return { kind, name, blob: await readCapped(res, MAX_FILE_BYTES) };
     controller.abort();
-  } catch {}
+  } catch (error) {
+    if (error.tooLarge) throw error;
+  }
   return null;
 }
 
@@ -111,7 +115,8 @@ async function send(url) {
   if (!(await browser.permissions.contains({ origins: ["<all_urls>"] }))) {
     throw new Error("Website access is off. Open the TorBox Send popup and click Grant access.");
   }
-  if (url.startsWith("magnet:"))return post("/torrents/createtorrent", { magnet: url });
+  if (url.startsWith("magnet:")) return post("/torrents/createtorrent", { magnet: url });
+  if (!isWebUrl(url)) throw new Error("Only magnet, http and https links can be sent.");
 
   const file = await fetchTorrentOrNzb(url);
   if (file?.kind === "torrent") return post("/torrents/createtorrent", { file: [file.blob, file.name] });
