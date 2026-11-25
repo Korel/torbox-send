@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TorBox Send",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Send magnet, .torrent, .nzb and hoster links to your TorBox account.",
   "icons": { "96": "icon.png" },
   "permissions": ["menus", "notifications", "storage"],
