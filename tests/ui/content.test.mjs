@@ -43,6 +43,13 @@ const badgeText = (page) =>
     return host ? host.shadowRoot.textContent : null;
   });
 
+const badgeBox = (page) =>
+  page.evaluate(() => {
+    const host = [...document.documentElement.children].find((el) => el.style.pointerEvents === "none");
+    const { left, right } = host.shadowRoot.firstElementChild.getBoundingClientRect();
+    return { left, right, width: innerWidth };
+  });
+
 const realChecks = (page) =>
   page.evaluate(() => window.sentMessages.filter((m) => m.type === "check-cached" && !m.knownOnly));
 
@@ -109,5 +116,17 @@ test("hover badge says cached when an earlier check found it, without asking Tor
 
   const asked = await page.evaluate(() => window.sentMessages.filter((m) => m.type === "check-cached" && !m.knownOnly));
   assert.deepEqual(asked, []);
+  await page.close();
+});
+
+test("hover badge stays inside the window next to the right edge, also once it says cached", async () => {
+  const page = await openPage({ knownCached: "a{40}" });
+  await page.hover("#edge-magnet");
+  await page.waitForTimeout(100);
+  assert.match((await badgeText(page)) ?? "", /cached/);
+  const box = await badgeBox(page);
+  await page.screenshot({ path: file("../../test-results/ui/hover-edge.png"), clip: { x: 400, y: 0, width: 400, height: 200 } });
+  assert.ok(box.right <= box.width, `badge ends at ${box.right}px in a ${box.width}px window`);
+  assert.ok(box.left >= 0);
   await page.close();
 });

@@ -14,6 +14,8 @@
   <div class="carousel" id="carousel"><span>One</span><span>Two</span><span>Three</span><span>Four</span><span>Five</span></div>
   <p><a id="cached-magnet" href="magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=Cached.Release">Cached release (magnet)</a></p>
   <p><a id="plain-magnet" href="magnet:?xt=urn:btih:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb&dn=Other.Release">Other release (magnet)</a></p>
+  <!-- A link flush with the right edge, where the badge would run off the window. -->
+  <p style="text-align: right"><a id="edge-magnet" href="magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&dn=Edge">Edge</a></p>
   <script>
     const carousel = document.getElementById("carousel");
     setInterval(() => (carousel.scrollLeft = (carousel.scrollLeft + 5) % 300), 20);

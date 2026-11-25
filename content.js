@@ -107,6 +107,14 @@ Object.assign(hintBox.style, {
 hintBox.append(cubeIcon(14), hintLabel);
 const hintHost = shadowHost("div", { position: "fixed", zIndex: "2147483647", pointerEvents: "none" }, hintBox);
 let hintedLink = null;
+let hintPointer = { x: 0, y: 0 };
+
+// Measured, not assumed: the label grows when the link turns out to be cached.
+function placeHint() {
+  const { width, height } = hintBox.getBoundingClientRect();
+  hintHost.style.left = `${Math.max(0, Math.min(hintPointer.x + 12, innerWidth - width - 4))}px`;
+  hintHost.style.top = `${Math.max(0, Math.min(hintPointer.y + 16, innerHeight - height - 4))}px`;
+}
 
 const HINT = "Click: send to TorBox";
 const CACHED_HINT = "Click: send to TorBox · ⚡ cached";
@@ -119,7 +127,10 @@ async function askCached(link, knownOnly) {
     .sendMessage({ type: "check-cached", urls: [link.href], knownOnly })
     .catch(() => null);
   const cached = answers?.[0] ?? null;
-  if (cached && hintedLink === link) hintLabel.textContent = CACHED_HINT;
+  if (cached && hintedLink === link) {
+    hintLabel.textContent = CACHED_HINT;
+    placeHint();
+  }
   return cached;
 }
 
@@ -147,9 +158,9 @@ document.addEventListener(
     clearTimeout(hoverCheckTimer);
     hintedLink = link;
     showHintCacheState(link);
-    hintHost.style.left = `${Math.min(event.clientX + 12, innerWidth - 170)}px`;
-    hintHost.style.top = `${Math.min(event.clientY + 16, innerHeight - 30)}px`;
+    hintPointer = { x: event.clientX, y: event.clientY };
     document.documentElement.append(hintHost);
+    placeHint();
   },
   true,
 );
