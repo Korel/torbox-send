@@ -170,6 +170,23 @@ test("a long list scrolls inside the popup, which itself never scrolls", async (
   await page.close();
 });
 
+test("Ask before sending is off by default, stores its choice, and needs Send on click", async () => {
+  const page = await openPopup("light");
+  await page.click("#tab-settings");
+  assert.equal(await page.isChecked("#confirm-capture"), false);
+
+  await page.click("label:has(#confirm-capture)");
+  assert.deepEqual(await page.evaluate(() => window.storageWrites), [{ confirmCapture: true }]);
+
+  await page.click("label:has(#auto-capture)");
+  assert.equal(await page.isDisabled("#confirm-capture"), true, "nothing to confirm when clicks don't send");
+  await page.close();
+
+  const stored = await openPopup("light", { storedSettings: { confirmCapture: true } });
+  assert.equal(await stored.isChecked("#confirm-capture"), true);
+  await stored.close();
+});
+
 for (const scheme of ["light", "dark"]) {
   test(`popup layout holds at ${POPUP_WIDTH}px (${scheme})`, async () => {
     const page = await openPopup(scheme);
@@ -190,6 +207,11 @@ for (const scheme of ["light", "dark"]) {
     const settingsProblems = await layoutProblems(page);
     await page.screenshot({ path: `${SCREENSHOTS}settings-${scheme}.png`, fullPage: true });
     assert.deepEqual(settingsProblems, []);
+    const settingsCutOff = await page.evaluate(() => {
+      const main = document.querySelector("main");
+      return main.scrollHeight - main.clientHeight;
+    });
+    assert.ok(settingsCutOff <= 0, `settings need scrolling: ${settingsCutOff}px don't fit the popup`);
     await page.close();
   });
 }

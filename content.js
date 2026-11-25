@@ -1,4 +1,4 @@
-const settings = { autoCapture: true, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
+const settings = { autoCapture: true, confirmCapture: false, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
 let hosterEntries = [];
 let hosterRules = null; // compiled on first use
 
@@ -78,8 +78,10 @@ Object.assign(toastBox.style, {
   font: "13px/1.4 system-ui, sans-serif", boxShadow: "0 4px 16px rgba(0,0,0,.35)", overflowWrap: "anywhere",
 });
 const toastHost = shadowHost("div", { position: "fixed", right: "16px", bottom: "16px", zIndex: "2147483647" }, toastBox);
-toastBox.addEventListener("click", () => toastHost.remove());
+// A toast goes away on any click; a prompt only through its buttons, Escape or its timeout.
+toastBox.addEventListener("click", () => promptedHref === null && toastHost.remove());
 let toastTimer = null;
+let promptedHref = null;
 
 function showToast({ state, title, detail }) {
   const heading = document.createElement("div");
@@ -89,11 +91,83 @@ function showToast({ state, title, detail }) {
   body.textContent = detail;
   toastBox.replaceChildren(heading, body);
   toastBox.style.background = TOAST_COLORS[state] || TOAST_COLORS.pending;
+  toastBox.style.cursor = "pointer";
+  promptedHref = null;
+  Object.assign(toastHost.style, { left: "auto", top: "auto", right: "16px", bottom: "16px" });
   document.documentElement.append(toastHost);
 
   clearTimeout(toastTimer);
   if (state !== "pending") toastTimer = setTimeout(() => toastHost.remove(), state === "error" ? 8000 : 4000);
 }
+
+const PROMPT_ARM_MS = 500;
+const PROMPT_TIMEOUT_MS = 15000;
+
+function promptButton(label, background, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  Object.assign(button.style, {
+    flex: "none", padding: "4px 14px", border: "1px solid rgba(255,255,255,.35)", borderRadius: "6px",
+    background, color: "#fff", font: "inherit", fontWeight: "600", whiteSpace: "nowrap", cursor: "pointer",
+  });
+  button.addEventListener("click", onClick);
+  return button;
+}
+
+function closePrompt() {
+  promptedHref = null;
+  clearTimeout(toastTimer);
+  toastHost.remove();
+}
+
+// "Ask before sending": the clicked link waits here until the user picks Send.
+function showPrompt(link, pointer) {
+  const href = link.href;
+  const shownAt = performance.now();
+  const heading = document.createElement("div");
+  heading.style.fontWeight = "600";
+  heading.textContent = "Send to TorBox?";
+  const name = document.createElement("div");
+  Object.assign(name.style, { display: "-webkit-box", overflow: "hidden" });
+  name.style.setProperty("-webkit-box-orient", "vertical");
+  name.style.setProperty("-webkit-line-clamp", "3");
+  const label = { href, text: link.textContent.trim().replace(/\s+/g, " ").slice(0, 120), title: link.title.trim().slice(0, 120) };
+  name.textContent = linkTitle(label, new Map()) || href;
+
+  const send = promptButton("Send", "#17946a", (event) => {
+    // Not armed at once, so the second half of a double-click on the link can't confirm it;
+    // untrusted clicks come from the page's script.
+    if (!event.isTrusted || performance.now() - shownAt < PROMPT_ARM_MS) return;
+    closePrompt();
+    browser.runtime.sendMessage({ type: "send", url: href });
+  });
+  const buttons = document.createElement("div");
+  Object.assign(buttons.style, { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" });
+  buttons.append(promptButton("Cancel", "transparent", closePrompt), send);
+
+  toastBox.replaceChildren(heading, name, buttons);
+  toastBox.style.background = TOAST_COLORS.pending;
+  toastBox.style.cursor = "default";
+  promptedHref = href;
+  document.documentElement.append(toastHost);
+  // Below the pointer, or above it at the bottom of the window, so the buttons never open under the pointer.
+  const { width, height } = toastBox.getBoundingClientRect();
+  const visible = visibleSize();
+  const below = pointer.y + 16;
+  const top = below + height + 4 <= visible.height ? below : pointer.y - height - 12;
+  Object.assign(toastHost.style, {
+    right: "auto", bottom: "auto",
+    left: `${Math.max(4, Math.min(pointer.x, visible.width - width - 4))}px`,
+    top: `${Math.max(4, top)}px`,
+  });
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(closePrompt, PROMPT_TIMEOUT_MS);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.isTrusted && event.key === "Escape" && promptedHref !== null) closePrompt();
+}, true);
 
 const hintLabel = document.createElement("span");
 hintLabel.textContent = "Click: send to TorBox";
@@ -234,7 +308,11 @@ document.addEventListener(
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    browser.runtime.sendMessage({ type: "send", url: link.href });
+    // Keyboard clicks (detail 0) carry no pointer position, so the prompt hangs off the link itself.
+    const rect = link.getBoundingClientRect();
+    const pointer = event.detail === 0 ? { x: rect.left, y: rect.bottom - 12 } : { x: event.clientX, y: event.clientY };
+    if (settings.confirmCapture) showPrompt(link, pointer);
+    else browser.runtime.sendMessage({ type: "send", url: link.href });
   },
   true,
 );

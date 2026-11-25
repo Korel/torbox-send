@@ -1,5 +1,6 @@
 const keyInput = document.getElementById("api-key");
 const autoCaptureInput = document.getElementById("auto-capture");
+const confirmCaptureInput = document.getElementById("confirm-capture");
 const hoverHintInput = document.getElementById("hover-hint");
 const includeStreamSitesInput = document.getElementById("include-stream-sites");
 const autoCheckSitesInput = document.getElementById("auto-check-sites");
@@ -90,7 +91,14 @@ showThemeToggle();
 
 // --- Settings ---
 
-autoCaptureInput.addEventListener("change", () => browser.storage.local.set({ autoCapture: autoCaptureInput.checked }));
+// Nothing to confirm when clicks don't send.
+const updateConfirmCapture = () => (confirmCaptureInput.disabled = !autoCaptureInput.checked);
+
+autoCaptureInput.addEventListener("change", () => {
+  browser.storage.local.set({ autoCapture: autoCaptureInput.checked });
+  updateConfirmCapture();
+});
+confirmCaptureInput.addEventListener("change", () => browser.storage.local.set({ confirmCapture: confirmCaptureInput.checked }));
 hoverHintInput.addEventListener("change", () => browser.storage.local.set({ hoverHint: hoverHintInput.checked }));
 includeStreamSitesInput.addEventListener("change", () =>
   browser.storage.local.set({ includeStreamSites: includeStreamSitesInput.checked }),
@@ -411,10 +419,12 @@ function selectTab(name) {
 document.getElementById("tab-links").addEventListener("click", () => selectTab("links"));
 document.getElementById("tab-settings").addEventListener("click", () => selectTab("settings"));
 
-const DEFAULTS = { apiKey: "", autoCapture: true, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
+const DEFAULTS = { apiKey: "", autoCapture: true, confirmCapture: false, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
 browser.storage.local.get(DEFAULTS).then((stored) => {
   keyInput.value = stored.apiKey;
   autoCaptureInput.checked = stored.autoCapture;
+  confirmCaptureInput.checked = stored.confirmCapture;
+  updateConfirmCapture();
   hoverHintInput.checked = stored.hoverHint;
   includeStreamSitesInput.checked = stored.includeStreamSites;
   setAutoCheckSites(stored.autoCheckSites);

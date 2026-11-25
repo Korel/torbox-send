@@ -165,6 +165,123 @@ test("on a listed site, a hover made by the page's own script checks nothing", a
   await page.close();
 });
 
+// --- "Ask before sending" prompt ---
+
+const ASK = { confirmCapture: true };
+const PROMPT_ARM_MS = 500; // content.js: Send ignores clicks for this long after the prompt appears
+
+const promptState = (page) =>
+  page.evaluate(() => {
+    const host = [...document.documentElement.children].find(
+      (el) => el.style.position === "fixed" && el.style.pointerEvents !== "none" && el.shadowRoot,
+    );
+    if (!host) return null;
+    const box = host.shadowRoot.firstElementChild;
+    return { text: box.textContent, buttons: [...box.querySelectorAll("button")].map((b) => b.textContent) };
+  });
+
+const sendButton = (page) => page.getByRole("button", { name: "Send", exact: true });
+const cancelButton = (page) => page.getByRole("button", { name: "Cancel", exact: true });
+
+test("with Ask before sending on, a click shows a prompt and sends nothing yet", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  const prompt = await promptState(page);
+  assert.match(prompt.text, /Send to TorBox\?/);
+  assert.match(prompt.text, /Other\.Release/);
+  assert.deepEqual(prompt.buttons, ["Cancel", "Send"]);
+  assert.deepEqual(await sends(page), []);
+  await page.close();
+});
+
+test("the prompt's Send button sends the link and closes the prompt", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await page.waitForTimeout(PROMPT_ARM_MS + 100);
+  await sendButton(page).click();
+  assert.deepEqual((await sends(page)).map((m) => m.url.slice(20, 60)), ["b".repeat(40)]);
+  assert.equal(await promptState(page), null);
+  await page.close();
+});
+
+test("the prompt's Cancel button and Escape send nothing and close the prompt", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await cancelButton(page).click();
+  assert.equal(await promptState(page), null);
+
+  await page.click("#cached-magnet");
+  assert.notEqual(await promptState(page), null);
+  await page.keyboard.press("Escape");
+  assert.equal(await promptState(page), null);
+  assert.deepEqual(await sends(page), []);
+  await page.close();
+});
+
+test("Send ignores a click that lands right as the prompt appears", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await sendButton(page).click({ timeout: PROMPT_ARM_MS - 100 });
+  assert.deepEqual(await sends(page), [], "a double-click must not confirm its own prompt");
+  assert.notEqual(await promptState(page), null);
+  await page.close();
+});
+
+test("the prompt's Send button ignores clicks made by the page's own script", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await page.waitForTimeout(PROMPT_ARM_MS + 100);
+  // Only possible here because the test opens our shadow roots; kept as a second line of defence.
+  await page.evaluate(() => {
+    const host = [...document.documentElement.children].find((el) => el.shadowRoot && el.style.pointerEvents !== "none");
+    for (const button of host.shadowRoot.querySelectorAll("button")) if (button.textContent === "Send") button.click();
+  });
+  assert.deepEqual(await sends(page), []);
+  await page.close();
+});
+
+test("a second click replaces the prompt, and Send sends only the latest link", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await page.click("#cached-magnet");
+  assert.match((await promptState(page)).text, /Cached\.Release/);
+  await page.waitForTimeout(PROMPT_ARM_MS + 100);
+  await sendButton(page).click();
+  assert.deepEqual((await sends(page)).map((m) => m.url.slice(20, 60)), ["a".repeat(40)]);
+  await page.close();
+});
+
+test("prompt layout holds with a very long name", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#long-magnet");
+  const problems = await page.evaluate(() => {
+    const host = [...document.documentElement.children].find((el) => el.shadowRoot && el.style.pointerEvents !== "none");
+    const box = host.shadowRoot.firstElementChild;
+    const found = [];
+    const rect = box.getBoundingClientRect();
+    if (rect.left < 0 || rect.top < 0 || rect.right > innerWidth || rect.bottom > innerHeight) found.push("prompt leaves the window");
+    if (document.documentElement.scrollWidth > document.documentElement.clientWidth) found.push("page scrolls sideways");
+    const buttons = [...box.querySelectorAll("button")];
+    for (const button of buttons) {
+      const b = button.getBoundingClientRect();
+      if (button.scrollWidth > button.clientWidth) found.push(`"${button.textContent}" is clipped`);
+      if (b.left < rect.left || b.right > rect.right || b.bottom > rect.bottom) found.push(`"${button.textContent}" sticks out`);
+      const range = document.createRange();
+      range.selectNodeContents(button);
+      if (new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size > 1) found.push(`"${button.textContent}" wraps`);
+    }
+    const tops = new Set(buttons.map((button) => Math.round(button.getBoundingClientRect().top)));
+    if (tops.size !== 1) found.push("buttons are not on one row");
+    return found;
+  });
+  await page.screenshot({ path: file("../../test-results/ui/prompt-long-name.png"), clip: { x: 0, y: 0, width: 500, height: 400 } });
+  assert.deepEqual(problems, []);
+
+  await page.click("#plain-magnet");
+  await page.screenshot({ path: file("../../test-results/ui/prompt.png"), clip: { x: 0, y: 0, width: 500, height: 400 } });
+  await page.close();
+});
+
 test("hover badge stays clear of an always-visible scrollbar", async () => {
   const page = await openPage({ knownCached: "a{40}" });
   // Headless Firefox draws overlay scrollbars, so stand in for one that takes 15px of the window.
@@ -176,5 +293,62 @@ test("hover badge stays clear of an always-visible scrollbar", async () => {
   await page.waitForTimeout(100);
   const box = await badgeBox(page);
   assert.ok(box.right <= box.width - 15, `badge ends at ${box.right}px; the scrollbar starts at ${box.width - 15}px`);
+  await page.close();
+});
+
+const promptBox = (page) =>
+  page.evaluate(() => {
+    const host = [...document.documentElement.children].find((el) => el.shadowRoot && el.style.pointerEvents !== "none");
+    const { left, top, right, bottom } = host.shadowRoot.firstElementChild.getBoundingClientRect();
+    return { left, top, right, bottom };
+  });
+
+async function clickPoint(page, selector) {
+  const { x, y, width, height } = await page.locator(selector).boundingBox();
+  return { x: x + width / 2, y: y + height / 2 };
+}
+
+test("the prompt opens just below where the link was clicked", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  const click = await clickPoint(page, "#plain-magnet");
+  await page.click("#plain-magnet");
+  const box = await promptBox(page);
+  assert.ok(box.top > click.y && box.top - click.y <= 30, `prompt starts ${box.top - click.y}px below the click`);
+  assert.ok(Math.abs(box.left - click.x) <= 30, `prompt starts ${box.left - click.x}px right of the click`);
+  await page.close();
+});
+
+test("the prompt stays inside the window and clear of the scrollbar at the right edge", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.evaluate(() => {
+    Object.defineProperty(document.documentElement, "clientWidth", { get: () => innerWidth - 15 });
+  });
+  await page.click("#edge-magnet");
+  const box = await promptBox(page);
+  await page.screenshot({ path: file("../../test-results/ui/prompt-edge.png"), clip: { x: 400, y: 0, width: 400, height: 300 } });
+  assert.ok(box.right <= 800 - 15, `prompt ends at ${box.right}px; the scrollbar starts at 785px`);
+  assert.ok(box.left >= 0);
+  await page.close();
+});
+
+test("at the bottom of the window the prompt opens above the click, not over it", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.evaluate(() => Object.assign(document.getElementById("long-magnet").style, { position: "fixed", left: "20px", bottom: "6px" }));
+  const click = await clickPoint(page, "#long-magnet");
+  await page.mouse.click(click.x, click.y);
+  const box = await promptBox(page);
+  await page.screenshot({ path: file("../../test-results/ui/prompt-bottom.png"), clip: { x: 0, y: 300, width: 500, height: 300 } });
+  assert.ok(box.bottom < click.y, `prompt ends at ${box.bottom}px, the click was at ${click.y}px`);
+  assert.ok(box.top >= 0 && box.bottom <= 600);
+  await page.close();
+});
+
+test("after a prompt, result toasts are back in the bottom right corner", async () => {
+  const page = await openPage({ storedSettings: ASK });
+  await page.click("#plain-magnet");
+  await page.evaluate(() => window.deliverMessage({ type: "toast", state: "ok", title: "Added to TorBox", detail: "Other.Release" }));
+  const box = await promptBox(page);
+  assert.equal(Math.round(800 - box.right), 16);
+  assert.equal(Math.round(600 - box.bottom), 16);
   await page.close();
 });

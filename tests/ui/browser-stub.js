@@ -22,6 +22,8 @@
   const listeners = [];
   const ignoredEvent = { addListener() {} };
   window.sentMessages = [];
+  // Lets a test play the background script, e.g. deliver a toast to the content script.
+  window.deliverMessage = (message) => listeners.forEach((listener) => listener(message, {}));
 
   window.browser = {
     runtime: {
@@ -55,7 +57,9 @@
         async get(defaults) {
           return { ...defaults, apiKey: "test-key", ...window.storedSettings };
         },
-        async set() {},
+        async set(values) {
+          (window.storageWrites ??= []).push(values);
+        },
         async remove() {},
       },
       onChanged: ignoredEvent,
