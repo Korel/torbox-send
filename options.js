@@ -409,14 +409,123 @@ async function loadLinks() {
   }, 1500);
 }
 
+// --- Check a magnet, info-hash or .torrent file ---
+
+const params = new URLSearchParams(location.search);
+const isPopup = params.has("popup");
+const checkInput = document.getElementById("check-input");
+const checkResult = document.getElementById("check-result");
+const checkName = document.getElementById("check-name");
+const checkSub = document.getElementById("check-sub");
+const checkSend = document.getElementById("check-send");
+const checkStatus = document.getElementById("check-status");
+const dropZone = document.getElementById("drop-zone");
+const torrentFile = document.getElementById("torrent-file");
+let checkRun = 0; // a newer input wins over answers still in flight
+let checkedSend = null; // the message Send posts for what is shown
+
+function showCheckError(text) {
+  checkRun++;
+  checkResult.hidden = true;
+  showStatus(checkStatus, text, !!text);
+}
+
+async function showChecked({ hash, name }, sendMessage) {
+  const run = ++checkRun;
+  showStatus(checkStatus, "");
+  checkedSend = sendMessage;
+  checkName.textContent = name || hash;
+  checkName.title = name || hash;
+  checkSub.textContent = "Checking TorBox cache…";
+  Object.assign(checkSend, { textContent: "Send", className: "btn sm primary", disabled: false, title: "" });
+  checkResult.hidden = false;
+
+  const answers = await browser.runtime.sendMessage({ type: "check-cached", urls: [`magnet:?xt=urn:btih:${hash}`] });
+  if (run !== checkRun) return;
+  const cached = Array.isArray(answers) ? answers[0] : null;
+  if (cached === true) {
+    const tag = Object.assign(document.createElement("span"), { className: "tag cached", textContent: "⚡ cached" });
+    checkSub.replaceChildren(tag, "adds instantly");
+  } else {
+    checkSub.textContent = cached === false ? "Not cached: TorBox downloads it first" : "Couldn't check the cache";
+  }
+}
+
+checkInput.addEventListener("input", () => {
+  const text = checkInput.value.trim();
+  if (!text) return showCheckError("");
+  const parsed = parseCheckInput(text);
+  if (!parsed) return showCheckError("Not a magnet link or info-hash.");
+  showChecked(parsed, { type: "send", url: parsed.magnet });
+});
+
+const TORRENT_FILE_ERRORS = {
+  "v2-only": "This is a v2-only torrent; TorBox's cache check needs a v1 info-hash.",
+};
+
+async function checkFile(file) {
+  selectTab("check");
+  checkInput.value = "";
+  if (file.size > 50 * 1024 * 1024) return showCheckError("That file is too large to be a .torrent.");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const info = await torrentFileInfo(bytes);
+  if (!info || info.error) return showCheckError(TORRENT_FILE_ERRORS[info?.error] || `${file.name} isn't a .torrent file.`);
+  showChecked({ hash: info.hash, name: info.name || file.name }, { type: "send-file", bytes, name: file.name });
+}
+
+checkSend.addEventListener("click", async () => {
+  checkSend.disabled = true;
+  checkSend.textContent = "Sending…";
+  // The popup toasts on the page behind it; the full page shows the outcome only here.
+  const result = await browser.runtime.sendMessage({ ...checkedSend, tabId: pageTabId, quiet: !isPopup });
+  checkSend.textContent = result?.ok ? "Added ✓" : "Failed";
+  checkSend.className = `btn sm ${result?.ok ? "done" : "failed"}`;
+  checkSend.title = result?.ok ? "" : result?.error || "";
+  checkSend.disabled = !!result?.ok;
+});
+
+// Firefox closes the popup when a file picker opens, so the popup hands picking to a full tab.
+document.getElementById("choose-file").addEventListener("click", () => {
+  if (isPopup) browser.tabs.create({ url: browser.runtime.getURL("options.html?check") });
+  else torrentFile.click();
+});
+torrentFile.addEventListener("change", () => {
+  if (torrentFile.files[0]) checkFile(torrentFile.files[0]);
+  torrentFile.value = "";
+});
+
+// A file dropped anywhere opens the Check tab; the about:addons copy has no tabs to show it in.
+const draggingFiles = (event) => event.dataTransfer?.types.includes("Files");
+if (isPopup || params.has("check")) {
+  document.addEventListener("dragover", (event) => {
+    if (!draggingFiles(event)) return;
+    event.preventDefault();
+    dropZone.classList.add("dragging");
+  });
+  document.addEventListener("dragleave", (event) => {
+    if (!event.relatedTarget) dropZone.classList.remove("dragging");
+  });
+  document.addEventListener("drop", (event) => {
+    dropZone.classList.remove("dragging");
+    const file = event.dataTransfer?.files[0];
+    if (!file) return;
+    event.preventDefault();
+    checkFile(file);
+  });
+}
+
 function selectTab(name) {
-  for (const view of ["links", "settings"]) {
+  for (const view of ["links", "check", "settings"]) {
     document.getElementById(`tab-${view}`).setAttribute("aria-selected", String(view === name));
     document.getElementById(`${view}-view`).hidden = view !== name;
   }
 }
 
 document.getElementById("tab-links").addEventListener("click", () => selectTab("links"));
+document.getElementById("tab-check").addEventListener("click", () => {
+  selectTab("check");
+  checkInput.focus();
+});
 document.getElementById("tab-settings").addEventListener("click", () => selectTab("settings"));
 
 const DEFAULTS = { apiKey: "", autoCapture: true, confirmCapture: false, hoverHint: true, includeStreamSites: false, autoCheckSites: [] };
@@ -429,10 +538,15 @@ browser.storage.local.get(DEFAULTS).then((stored) => {
   includeStreamSitesInput.checked = stored.includeStreamSites;
   setAutoCheckSites(stored.autoCheckSites);
 
-  // The toolbar popup opens this page as options.html?popup; the about:addons copy has no page to list.
-  if (new URLSearchParams(location.search).has("popup")) {
+  // The toolbar popup opens this page as options.html?popup, Choose file as ?check; about:addons has neither.
+  if (isPopup) {
     document.getElementById("tabs").hidden = false;
     selectTab(stored.apiKey ? "links" : "settings");
     loadLinks();
+  } else if (params.has("check")) {
+    document.body.classList.add("page");
+    document.getElementById("tabs").hidden = false;
+    document.getElementById("tab-links").hidden = true;
+    selectTab(stored.apiKey ? "check" : "settings");
   }
 });

@@ -87,6 +87,72 @@ function linkTitle({ href, text = "", title = "" }, magnetNames) {
   return stem && !/^[0-9a-f]{40}$/i.test(stem) ? stem : null;
 }
 
+// A pasted magnet or bare info-hash, as { hash, name, magnet } for checking and sending; else null.
+function parseCheckInput(text) {
+  const input = text.trim();
+  if (input.startsWith("magnet:")) {
+    const hash = magnetHash(input);
+    return hash ? { hash, name: magnetDisplayName(input) || null, magnet: input } : null;
+  }
+  let hash = null;
+  if (/^[0-9a-f]{40}$/i.test(input)) hash = input.toLowerCase();
+  else if (/^[a-z2-7]{32}$/i.test(input)) hash = base32ToHex(input);
+  return hash && { hash, name: null, magnet: `magnet:?xt=urn:btih:${hash}` };
+}
+
+const [B_COLON, B_DICT, B_END, B_INT, B_LIST] = [0x3a, 0x64, 0x65, 0x69, 0x6c];
+
+// Index just past the bencoded value at i; throws on malformed or truncated input.
+function bencodeEnd(bytes, i) {
+  const byte = bytes[i];
+  if (byte === B_INT) {
+    const end = bytes.indexOf(B_END, i);
+    if (end < 0) throw new Error("bad int");
+    return end + 1;
+  }
+  if (byte === B_LIST || byte === B_DICT) {
+    for (i++; bytes[i] !== B_END; ) i = bencodeEnd(bytes, i);
+    return i + 1;
+  }
+  const colon = bytes.indexOf(B_COLON, i);
+  const length = new TextDecoder().decode(bytes.subarray(i, colon));
+  if (colon < 0 || !/^\d+$/.test(length)) throw new Error("bad string");
+  const end = colon + 1 + Number(length);
+  if (end > bytes.length) throw new Error("truncated");
+  return end;
+}
+
+// Dict keys mapped to the [start, end) byte range of their values.
+function bencodeDict(bytes, i) {
+  if (bytes[i] !== B_DICT) throw new Error("not a dict");
+  const fields = {};
+  for (i++; bytes[i] !== B_END; ) {
+    const keyEnd = bencodeEnd(bytes, i);
+    const key = new TextDecoder().decode(bencodeString(bytes, [i, keyEnd]));
+    fields[key] = [keyEnd, (i = bencodeEnd(bytes, keyEnd))];
+  }
+  return fields;
+}
+
+const bencodeString = (bytes, [start, end]) => bytes.subarray(bytes.indexOf(B_COLON, start) + 1, end);
+
+// The v1 info-hash (SHA-1 of the raw info dict) and name of a .torrent file; { error } or null when unusable.
+async function torrentFileInfo(bytes) {
+  try {
+    const range = bencodeDict(bytes, 0).info;
+    if (!range || bytes[range[0]] !== B_DICT) return null;
+    const info = bencodeDict(bytes, range[0]);
+    if (!info.pieces) return info["meta version"] ? { error: "v2-only" } : null;
+    const nameRange = info["name.utf-8"] || info.name;
+    const name = nameRange ? new TextDecoder().decode(bencodeString(bytes, nameRange)) : null;
+    const digest = await crypto.subtle.digest("SHA-1", bytes.subarray(...range));
+    const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    return { hash, name };
+  } catch {
+    return null;
+  }
+}
+
 function chunk(items, size) {
   const groups = [];
   for (let i = 0; i < items.length; i += size) groups.push(items.slice(i, i + size));
@@ -165,5 +231,7 @@ if (typeof module === "object") {
     isWebUrl,
     isCapturable,
     readCapped,
+    parseCheckInput,
+    torrentFileInfo,
   };
 }

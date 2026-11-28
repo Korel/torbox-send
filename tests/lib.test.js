@@ -13,7 +13,10 @@ const {
   isWebUrl,
   isCapturable,
   readCapped,
+  parseCheckInput,
+  torrentFileInfo,
 } = require("../lib.js");
+const { createHash } = require("node:crypto");
 
 const HEX = "c12fe1c06bba254a9dc9f519b335aa7c1367a88a";
 
@@ -170,4 +173,42 @@ test("readCapped stops reading a body that outgrows the cap", async () => {
   });
   await assert.rejects(readCapped(new Response(endless), 10), { tooLarge: true });
   assert.equal(cancelled, true);
+});
+
+test("parseCheckInput accepts magnets and bare hex or base32 hashes", () => {
+  const magnet = `magnet:?xt=urn:btih:${HEX}&dn=Some.Release`;
+  assert.deepEqual(parseCheckInput(`  ${magnet}\n`), { hash: HEX, name: "Some.Release", magnet });
+  assert.deepEqual(parseCheckInput(HEX.toUpperCase()), { hash: HEX, name: null, magnet: `magnet:?xt=urn:btih:${HEX}` });
+  assert.equal(parseCheckInput("YEX6DQDLXISUVHOJ6UM3GNNKPQJWPKEK").hash, HEX);
+});
+
+test("parseCheckInput rejects anything without a v1 info-hash", () => {
+  for (const text of ["", "hello", "magnet:?xt=urn:btmh:1220abcd", HEX.slice(1), `https://x.org/${HEX}.torrent`]) {
+    assert.equal(parseCheckInput(text), null, text);
+  }
+});
+
+const bytes = (...parts) => Buffer.concat(parts.map((part) => Buffer.from(part, typeof part === "string" ? "latin1" : undefined)));
+const sha1 = (buffer) => createHash("sha1").update(buffer).digest("hex");
+
+test("torrentFileInfo hashes the exact info dict bytes and reads its name", async () => {
+  const pieces = Buffer.from([0x00, 0x65, 0x64, 0xff, 0x3a, 0x69]); // contains "e", "d", ":" and "i" bytes
+  const info = bytes("d5:filesld6:lengthi-3e4:pathl1:aeee4:name12:Some.Release12:piece lengthi16384e6:pieces6:", pieces, "e");
+  const file = bytes("d8:announce14:http://t.org/a4:info", info, "8:url-listl0:ee");
+  assert.deepEqual(await torrentFileInfo(new Uint8Array(file)), { hash: sha1(info), name: "Some.Release" });
+});
+
+test("torrentFileInfo decodes UTF-8 names and accepts hybrid v1+v2 torrents", async () => {
+  const name = Buffer.from("Ünïcode ✓", "utf8");
+  const info = bytes(`d12:meta versioni2e4:name${name.length}:`, name, "6:pieces0:e");
+  const result = await torrentFileInfo(new Uint8Array(bytes("d4:info", info, "e")));
+  assert.deepEqual(result, { hash: sha1(info), name: "Ünïcode ✓" });
+});
+
+test("torrentFileInfo flags v2-only torrents and rejects junk", async () => {
+  const v2 = bytes("d4:infod9:file treede12:meta versioni2e4:name1:xee");
+  assert.deepEqual(await torrentFileInfo(new Uint8Array(v2)), { error: "v2-only" });
+  for (const junk of ["", "not bencode", "d4:infoi1ee", "d4:name1:xe", "d4:infod4:name1:x", "l4:infoe"]) {
+    assert.equal(await torrentFileInfo(new Uint8Array(bytes(junk))), null, junk);
+  }
 });

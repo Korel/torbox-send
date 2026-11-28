@@ -98,6 +98,18 @@
     .link-btn { border: 0; padding: 0; background: none; color: var(--green); cursor: pointer; font-size: inherit; }
     .link-btn:hover { text-decoration: underline; }
 
+    .text-input { width: 100%; padding: 6px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text); font: inherit; }
+    .text-input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px var(--focus); }
+    .drop-zone { padding: 12px; border: 1.5px dashed var(--border); border-radius: 10px; }
+    .drop-zone.dragging { border-color: var(--green); background: var(--green-soft); }
+    .check-result { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+    .check-result[hidden] { display: none; }
+    /* Fixed width, so Sending…/Added ✓/Failed never move it. */
+    #check-send { flex: none; width: 6.5em; text-align: center; }
+    /* options.html?check: opened in a tab for the file picker, which closes the popup. */
+    body.page { margin: 32px auto; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    html:has(body.page) { background: var(--bg); }
+
     .toggles { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
     .toggle { display: flex; align-items: flex-start; gap: 12px; padding: 7px 12px; cursor: pointer; }
     .toggle + .toggle { border-top: 1px solid var(--border); }
@@ -119,6 +131,7 @@
     <span class="name">TorBox Send</span>
     <nav id="tabs" class="tabs" hidden>
       <button id="tab-links" type="button" aria-selected="true">Links</button>
+      <button id="tab-check" type="button" aria-selected="false">Check</button>
       <button id="tab-settings" type="button" aria-selected="false">Settings</button>
     </nav>
     <button id="theme-toggle" type="button" class="icon-btn"></button>
@@ -147,6 +160,25 @@
           <button id="check-cache" type="button" class="btn sm" hidden title="Ask TorBox which of these magnets it already has cached">Check cache</button>
         </span>
       </div>
+    </section>
+
+    <section id="check-view" hidden>
+      <div id="drop-zone" class="drop-zone">
+        <input id="check-input" class="text-input" type="text" autocomplete="off" spellcheck="false" placeholder="Paste a magnet or info-hash" aria-label="Magnet link or info-hash">
+        <p class="hint">
+          …or drop a .torrent file here.
+          <button id="choose-file" type="button" class="link-btn">Choose file</button>
+        </p>
+        <input id="torrent-file" type="file" accept=".torrent,application/x-bittorrent" hidden>
+      </div>
+      <div id="check-result" class="check-result" hidden>
+        <div class="link-text">
+          <div id="check-name" class="link-title"></div>
+          <div id="check-sub" class="link-sub"></div>
+        </div>
+        <button id="check-send" type="button" class="btn sm primary">Send</button>
+      </div>
+      <p id="check-status" class="status"></p>
     </section>
 
     <section id="settings-view">

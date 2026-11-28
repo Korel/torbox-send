@@ -28,6 +28,7 @@
   window.browser = {
     runtime: {
       onMessage: { addListener: (listener) => listeners.push(listener) },
+      getURL: (path) => new URL(path, location.href).href,
       async sendMessage(message) {
         window.sentMessages.push(message);
         if (message.type === "is-sendable-page") return false;
@@ -49,7 +50,9 @@
         const reply = { type: "links", requestId: message.requestId, links };
         setTimeout(() => listeners.forEach((listener) => listener(reply, { tab: { id: tabId }, frameId: 0 })));
       },
-      create() {},
+      create(properties) {
+        (window.createdTabs ??= []).push(properties);
+      },
     },
     storage: {
       local: {

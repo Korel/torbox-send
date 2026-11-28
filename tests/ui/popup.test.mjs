@@ -3,6 +3,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { firefox } from "playwright";
 
 const POPUP_URL = `${pathToFileURL(fileURLToPath(new URL("../../options.html", import.meta.url)))}?popup`;
@@ -10,6 +11,35 @@ const STUB = fileURLToPath(new URL("./browser-stub.js", import.meta.url));
 const SCREENSHOTS = fileURLToPath(new URL("../../test-results/ui/", import.meta.url));
 const POPUP_WIDTH = 400; // options.html: body { width: 25rem }
 const BUTTON_LABELS = { "check-cache": ["Check cache", "Checking…", "⚡ 100 cached", "None cached", "Check failed"] };
+const CHECK_LABELS = { "check-send": ["Send", "Sending…", "Added ✓", "Failed"] };
+const CHECK_PAGE_URL = POPUP_URL.replace("?popup", "?check");
+
+const LONG_NAME = "A.Very.Long.Release.Name.That.Goes.On.And.On.2026.2160p.UHD.BluRay.REMUX.HDR.DV.TrueHD.Atmos-EXAMPLE";
+const INFO = Buffer.from(`d4:name${LONG_NAME.length}:${LONG_NAME}12:piece lengthi16384e6:pieces0:e`, "latin1");
+const TORRENT = Buffer.concat([Buffer.from("d8:announce14:http://t.org/a4:info"), INFO, Buffer.from("e")]);
+const TORRENT_HASH = createHash("sha1").update(INFO).digest("hex");
+
+// Drops TORRENT on the popup the way a file dragged in from the desktop arrives.
+function dropTorrent(page, selector = "body") {
+  return page.evaluate(([bytes, selector]) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([new Uint8Array(bytes)], "Some.Release.torrent", { type: "application/x-bittorrent" }));
+    const target = document.querySelector(selector);
+    for (const type of ["dragenter", "dragover", "drop"]) {
+      target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }));
+    }
+  }, [[...TORRENT], selector]);
+}
+
+async function openCheckPage(colorScheme) {
+  const page = await browser.newPage({ viewport: { width: 900, height: 700 }, colorScheme });
+  await page.addInitScript({ path: STUB });
+  await page.goto(CHECK_PAGE_URL);
+  await page.waitForSelector("#check-view:not([hidden])");
+  return page;
+}
+
+const sentOf = (page, type) => page.evaluate((type) => window.sentMessages.filter((m) => m.type === type), type);
 
 let browser;
 before(async () => {
@@ -58,7 +88,7 @@ function layoutProblems(page, labels = {}) {
       }
     };
     const buttonBoxes = () =>
-      visible(".links-footer .btn").map((b) => JSON.stringify(b.getBoundingClientRect())).join();
+      visible(".links-footer .btn, #check-send").map((b) => JSON.stringify(b.getBoundingClientRect())).join();
 
     check("initial");
     const initialBoxes = buttonBoxes();
@@ -69,7 +99,7 @@ function layoutProblems(page, labels = {}) {
       for (const text of texts) {
         button.textContent = text;
         check(`${id}="${text}"`);
-        if (buttonBoxes() !== initialBoxes) problems.push(`${id}="${text}": footer buttons move`);
+        if (buttonBoxes() !== initialBoxes) problems.push(`${id}="${text}": buttons move`);
       }
       button.textContent = original;
     }
@@ -186,6 +216,103 @@ test("Ask before sending is off by default, stores its choice, and needs Send on
   assert.equal(await stored.isChecked("#confirm-capture"), true);
   await stored.close();
 });
+
+test("Check tab checks a pasted magnet and sends it", async () => {
+  const page = await openPopup("light");
+  await page.click("#tab-check");
+  const magnet = `magnet:?xt=urn:btih:${"a".repeat(40)}&dn=Pasted.Release`;
+  await page.fill("#check-input", magnet);
+  await page.waitForSelector("#check-sub .tag.cached");
+  assert.equal(await page.textContent("#check-name"), "Pasted.Release");
+  assert.deepEqual((await realCacheChecks(page)).map((m) => m.urls), [[`magnet:?xt=urn:btih:${"a".repeat(40)}`]]);
+
+  await page.click("#check-send");
+  await page.waitForSelector("#check-send.done");
+  assert.deepEqual(await sentOf(page, "send"), [{ type: "send", url: magnet, tabId: 1, quiet: false }]);
+
+  await page.fill("#check-input", "not a hash");
+  assert.equal(await page.isHidden("#check-result"), true);
+  assert.match(await page.textContent("#check-status"), /magnet|hash/i);
+  assert.equal((await realCacheChecks(page)).length, 1, "junk asks TorBox nothing");
+  await page.close();
+});
+
+test("dropping a .torrent anywhere on the popup checks its hash and sends the file", async () => {
+  const page = await openPopup("light");
+  await dropTorrent(page, "#links");
+  await page.waitForSelector("#check-view:not([hidden]) #check-sub:has-text('Not cached')");
+  assert.equal(await page.getAttribute("#tab-check", "aria-selected"), "true");
+  assert.equal(await page.textContent("#check-name"), LONG_NAME);
+  assert.deepEqual((await realCacheChecks(page)).map((m) => m.urls), [[`magnet:?xt=urn:btih:${TORRENT_HASH}`]]);
+
+  await page.click("#check-send");
+  await page.waitForSelector("#check-send.done");
+  const [sent] = await sentOf(page, "send-file");
+  assert.equal(sent.name, "Some.Release.torrent");
+  assert.deepEqual(Buffer.from(Object.values(sent.bytes)), TORRENT);
+  await page.close();
+});
+
+test("a dropped file that isn't a usable torrent says so and asks TorBox nothing", async () => {
+  const page = await openPopup("light");
+  await page.click("#tab-check");
+  await page.evaluate(() => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(["hello"], "notes.txt"));
+    document.body.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  });
+  await page.waitForSelector("#check-status.error");
+  assert.equal(await page.isHidden("#check-result"), true);
+  assert.deepEqual(await realCacheChecks(page), []);
+  await page.close();
+});
+
+test("Choose file in the popup opens the Check tab as a full page, where the picker works", async () => {
+  const popup = await openPopup("light");
+  await popup.click("#tab-check");
+  await popup.click("#choose-file");
+  const [created] = await popup.evaluate(() => window.createdTabs);
+  assert.match(created.url, /options\.html\?check$/);
+  await popup.close();
+
+  const page = await openCheckPage("light");
+  assert.equal(await page.isHidden("#tab-links"), true);
+  assert.equal(await page.isVisible("#tab-settings"), true);
+  await page.setInputFiles("#torrent-file", { name: "Some.Release.torrent", mimeType: "application/x-bittorrent", buffer: TORRENT });
+  await page.waitForSelector("#check-sub:has-text('Not cached')");
+  await page.click("#check-send");
+  await page.waitForSelector("#check-send.done");
+  const [sent] = await sentOf(page, "send-file");
+  assert.equal(sent.quiet, true, "the page shows the outcome; no toast or notification");
+  await page.close();
+});
+
+for (const scheme of ["light", "dark"]) {
+  test(`Check tab layout holds (${scheme})`, async () => {
+    const popup = await openPopup(scheme);
+    await popup.click("#tab-check");
+    const emptyProblems = await layoutProblems(popup);
+    await popup.screenshot({ path: `${SCREENSHOTS}check-empty-${scheme}.png`, fullPage: true });
+    assert.deepEqual(emptyProblems, []);
+
+    await dropTorrent(popup);
+    await popup.waitForSelector("#check-sub:has-text('Not cached')");
+    const problems = await layoutProblems(popup, CHECK_LABELS);
+    await popup.screenshot({ path: `${SCREENSHOTS}check-${scheme}.png`, fullPage: true });
+    assert.deepEqual(problems, []);
+
+    await popup.fill("#check-input", "nope");
+    await popup.screenshot({ path: `${SCREENSHOTS}check-error-${scheme}.png`, fullPage: true });
+    assert.deepEqual(await layoutProblems(popup), []);
+    await popup.close();
+
+    const page = await openCheckPage(scheme);
+    const pageProblems = await layoutProblems(page);
+    await page.screenshot({ path: `${SCREENSHOTS}check-page-${scheme}.png` });
+    assert.deepEqual(pageProblems, []);
+    await page.close();
+  });
+}
 
 for (const scheme of ["light", "dark"]) {
   test(`popup layout holds at ${POPUP_WIDTH}px (${scheme})`, async () => {

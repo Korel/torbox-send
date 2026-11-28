@@ -18,15 +18,16 @@ Firefox does not update add-ons installed this way; install the newer `.xpi` ove
 - **Hover badge.** With auto-capture on, hovering a link it will capture shows a small TorBox badge. Can be turned off.
 - **The page you're on.** On a file-hoster page (e.g. a Mega or Pixeldrain file), right-click the page → **Send this page to TorBox**, or use the first row of the popup's Links tab.
 - **Cached on TorBox.** **Check cache** in the popup asks TorBox which torrents on the page it already has cached; those get a ⚡ (adds instantly) in the Links list and the hover badge. On sites you add in Settings (or with **Check when the popup opens** in the popup), opening the popup runs the check for you, and resting the pointer on a link for 0.4 s checks just that link for the hover badge. Elsewhere the hover badge only shows earlier answers. Magnets are checked, and so are `.torrent` links named after their hash (e.g. `itorrents.org/torrent/<hash>.torrent`); other `.torrent` links are not, since that would mean downloading every file.
-- **Toolbar button** opens two tabs: **Links on this page** lists every sendable link (including ones hidden in collapsed menus), split into Magnets, .torrent and Other tabs, with **Send** and **Show** (scrolls to it and highlights it). A `.torrent` link labelled just "download" takes the name of the magnet with the same hash, else its file name; **Settings** holds the API key and toggles.
+- **Check one torrent.** The popup's **Check** tab takes a pasted magnet or info-hash, or a `.torrent` file dropped anywhere on the popup, and says whether TorBox has it cached, with **Send** next to it. The file's info-hash is computed in the browser; only the hash is checked. **Choose file** opens the Check tab in a browser tab, since Firefox closes the popup when a file picker opens. v2-only torrents can't be checked.
+- **Toolbar button** opens three tabs: **Links on this page** lists every sendable link (including ones hidden in collapsed menus), split into Magnets, .torrent and Other tabs, with **Send** and **Show** (scrolls to it and highlights it). A `.torrent` link labelled just "download" takes the name of the magnet with the same hash, else its file name; **Check** (above); **Settings** holds the API key and toggles.
 
 ## What leaves your browser
 
 | Data | Goes to | When |
 |---|---|---|
-| API key + the link or file | `api.torbox.app` | Only when you click or right-click a link |
+| API key + the link or file | `api.torbox.app` | Only when you click or right-click a link, or click **Send** in the Check tab (a dropped or picked `.torrent` is uploaded as is) |
 | A GET for the link (with that site's cookies) | The site the link points to | Same, to fetch `.torrent`/`.nzb` files (up to 50 MB); aborted after the headers for other links |
-| API key + info-hashes of the page's magnets and hash-named `.torrent` links | `api.torbox.app/v1/api/torrents/checkcached` | When you click **Check cache**; on sites you listed, also when you open the popup (whole page) or rest the pointer on a link for 0.4 s (that link). Answers are kept for 10 minutes, so repeats aren't re-sent |
+| API key + info-hashes of the page's magnets and hash-named `.torrent` links, or of the magnet, hash or `.torrent` you give the Check tab | `api.torbox.app/v1/api/torrents/checkcached` | When you click **Check cache**, or paste, drop or pick something in the Check tab; on sites you listed, also when you open the popup (whole page) or rest the pointer on a link for 0.4 s (that link). Answers are kept for 10 minutes, so repeats aren't re-sent |
 | API key | `api.torbox.app/v1/api/user/me` | When you click **Save** in Settings, to check the key before storing it |
 | Nothing (plain GET, no key) | `api.torbox.app/v1/api/webdl/hosters` | At most once a day, to refresh the list of supported hosters |
 

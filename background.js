@@ -111,10 +111,14 @@ async function post(path, fields) {
   return body;
 }
 
-async function send(url) {
+async function requireAccess() {
   if (!(await browser.permissions.contains({ origins: ["<all_urls>"] }))) {
     throw new Error("Website access is off. Open the TorBox Send popup and click Grant access.");
   }
+}
+
+async function send(url) {
+  await requireAccess();
   if (url.startsWith("magnet:")) return post("/torrents/createtorrent", { magnet: url });
   if (!isWebUrl(url)) throw new Error("Only magnet, http and https links can be sent.");
 
@@ -127,6 +131,13 @@ async function send(url) {
   // TorBox fetches the NZB itself; this only helps for public links.
   if (NZB_NAME.test(name)) return post("/usenet/createusenetdownload", { link: url });
   return post("/webdl/createwebdownload", { link: url });
+}
+
+// A .torrent the user dropped or picked in the popup's Check tab.
+async function sendTorrentFile(bytes, name) {
+  await requireAccess();
+  if (bytes.byteLength > MAX_FILE_BYTES) throw new Error("File is larger than 50 MB.");
+  return post("/torrents/createtorrent", { file: [new Blob([bytes], { type: "application/x-bittorrent" }), name] });
 }
 
 // failOpen: with no hoster list yet, say yes rather than hide a link TorBox could take.
@@ -205,19 +216,22 @@ async function report(tabId, state, title, detail) {
   }
 }
 
-async function sendAndReport(url, tabId) {
-  const name = displayName(url);
-  await report(tabId, "pending", "Sending to TorBox…", name);
+// quiet: the caller shows the outcome itself, so no toast or notification.
+async function reportSend(name, tabId, quiet, sendIt) {
+  const notify = quiet ? async () => {} : report;
+  await notify(tabId, "pending", "Sending to TorBox…", name);
   try {
-    const body = await send(url);
+    const body = await sendIt();
     const addedName = body.data?.name || name;
-    await report(tabId, "ok", "Added to TorBox", addedName);
+    await notify(tabId, "ok", "Added to TorBox", addedName);
     return { ok: true, name: addedName };
   } catch (error) {
-    await report(tabId, "error", "Not added to TorBox", error.message);
+    await notify(tabId, "error", "Not added to TorBox", error.message);
     return { ok: false, error: error.message };
   }
 }
+
+const sendAndReport = (url, tabId, quiet = false) => reportSend(displayName(url), tabId, quiet, () => send(url));
 
 function createMenu() {
   browser.menus.removeAll().then(() => {
@@ -253,7 +267,10 @@ browser.runtime.onMessage.addListener((message, sender) => {
   if (message?.type === "check-cached" && Array.isArray(message.urls)) {
     return checkCached(message.urls.map(String), { knownOnly: message.knownOnly === true });
   }
+  if (message?.type === "send-file" && ArrayBuffer.isView(message.bytes) && typeof message.name === "string") {
+    return reportSend(message.name, message.tabId, message.quiet === true, () => sendTorrentFile(message.bytes, message.name));
+  }
   if (typeof message?.url !== "string") return;
-  if (message.type === "send") return sendAndReport(message.url, sender.tab?.id ?? message.tabId);
+  if (message.type === "send") return sendAndReport(message.url, sender.tab?.id ?? message.tabId, message.quiet === true);
   if (message.type === "is-sendable-page") return isSendable(message.url, { failOpen: false });
 });
