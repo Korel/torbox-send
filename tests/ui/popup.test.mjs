@@ -69,7 +69,7 @@ function layoutProblems(page, labels = {}) {
     const visible = (selector) => [...document.querySelectorAll(selector)].filter((el) => el.getClientRects().length);
     const check = (state) => {
       if (root.scrollWidth > root.clientWidth) problems.push(`${state}: page is ${root.scrollWidth}px wide`);
-      for (const el of visible(".btn, .legend, .tabs button, .kinds button, #theme-toggle")) {
+      for (const el of visible(".btn, .legend, .tabs button, .kinds button, #theme-toggle, #brand")) {
         const name = el.id || el.className;
         if (el.scrollWidth > el.clientWidth) problems.push(`${state}: "${el.textContent.trim()}" clipped in ${name}`);
         if (el.getBoundingClientRect().right > root.clientWidth) problems.push(`${state}: ${name} sticks out`);
@@ -215,6 +215,15 @@ test("Ask before sending is off by default, stores its choice, and needs Send on
   const stored = await openPopup("light", { storedSettings: { confirmCapture: true } });
   assert.equal(await stored.isChecked("#confirm-capture"), true);
   await stored.close();
+});
+
+test("the logo and name open the TorBox dashboard", async () => {
+  const page = await openPopup("light");
+  await page.click("#brand img");
+  await page.click("#brand .name");
+  const urls = await page.evaluate(() => window.createdTabs.map((tab) => tab.url));
+  assert.deepEqual(urls, ["https://torbox.app/dashboard", "https://torbox.app/dashboard"]);
+  await page.close();
 });
 
 test("Check tab checks a pasted magnet and sends it", async () => {

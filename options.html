@@ -34,7 +34,9 @@
     header img { width: 22px; height: 22px; }
     .icon-btn { display: grid; place-items: center; flex: none; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted); cursor: pointer; }
     .icon-btn:hover { background: var(--hover); color: var(--text); }
-    header .name { font-weight: 650; font-size: 14px; flex: 1; }
+    .brand { display: flex; align-items: center; gap: 8px; margin: -4px auto -4px -6px; padding: 4px 6px; border-radius: 7px; color: inherit; text-decoration: none; }
+    .brand:hover { background: var(--hover); }
+    header .name { font-weight: 650; font-size: 14px; white-space: nowrap; }
 
     .tabs { display: flex; padding: 2px; border-radius: 8px; background: var(--hover); }
     .tabs button { border: 0; border-radius: 6px; background: none; padding: 4px 12px; color: var(--muted); cursor: pointer; }
@@ -127,8 +129,10 @@
 </head>
 <body>
   <header>
-    <img src="icon.png" alt="">
-    <span class="name">TorBox Send</span>
+    <a id="brand" class="brand" href="https://torbox.app/dashboard" title="Open TorBox dashboard ↗">
+      <img src="icon.png" alt="">
+      <span class="name">TorBox Send</span>
+    </a>
     <nav id="tabs" class="tabs" hidden>
       <button id="tab-links" type="button" aria-selected="true">Links</button>
       <button id="tab-check" type="button" aria-selected="false">Check</button>

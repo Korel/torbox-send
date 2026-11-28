@@ -118,6 +118,11 @@ autoCheckSitesInput.addEventListener("change", () => {
   browser.storage.local.set({ autoCheckSites: sites });
 });
 
+document.getElementById("brand").addEventListener("click", (event) => {
+  event.preventDefault();
+  browser.tabs.create({ url: event.currentTarget.href });
+});
+
 document.getElementById("get-key").addEventListener("click", () => {
   browser.tabs.create({ url: "https://torbox.app/settings" });
 });
